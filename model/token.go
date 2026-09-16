@@ -32,6 +32,31 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
+const (
+	LegacySubRouterGroup          = "subrouter"
+	LegacySubRouterExhaustedGroup = "subrouter_exhausted"
+)
+
+func IsLegacySubRouterToken(token *Token) bool {
+	if token == nil {
+		return false
+	}
+	return token.Group == LegacySubRouterGroup || token.Group == LegacySubRouterExhaustedGroup || strings.Contains(strings.ToLower(token.Name), "subrouter")
+}
+
+func IsLegacySubRouterExhausted(token *Token) bool {
+	return token != nil && token.Group == LegacySubRouterExhaustedGroup
+}
+
+func MarkLegacySubRouterTokenExhausted(tokenID int) error {
+	if tokenID <= 0 {
+		return errors.New("invalid token id")
+	}
+	return DB.Model(&Token{}).
+		Where("id = ? AND "+commonGroupCol+" = ?", tokenID, LegacySubRouterGroup).
+		Update("group", LegacySubRouterExhaustedGroup).Error
+}
+
 func (token *Token) GetAutoGroups() ([]string, error) {
 	if token.AutoGroups == "" {
 		return nil, nil

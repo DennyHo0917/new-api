@@ -1,6 +1,8 @@
 package router
 
 import (
+	"crypto/subtle"
+	"os"
 	"strconv"
 	"strings"
 
@@ -16,21 +18,28 @@ import (
 func DistUserAuth() gin.HandlerFunc {
 	userAuth := middleware.UserAuth()
 	return func(c *gin.Context) {
-		// 1. Check New-Api-User header first
-		if userIdStr := strings.TrimSpace(c.GetHeader("New-Api-User")); userIdStr != "" {
-			if userId, err := strconv.Atoi(userIdStr); err == nil && userId > 0 {
-				u, err := model.GetUserById(userId, false)
-				if err == nil && u != nil && u.Status == common.UserStatusEnabled {
-					c.Set("id", u.Id)
-					c.Set("username", u.Username)
-					c.Set("role", u.Role)
-					c.Next()
-					return
+		// The user header is an internal integration contract, never a public
+		// identity selector. It is accepted only with a configured shared secret.
+		internalSecret := strings.TrimSpace(os.Getenv("DIST_INTERNAL_SHARED_SECRET"))
+		providedSecret := strings.TrimSpace(c.GetHeader("X-New-API-Internal-Secret"))
+		trustedHeader := internalSecret != "" && len(internalSecret) == len(providedSecret) &&
+			subtle.ConstantTimeCompare([]byte(internalSecret), []byte(providedSecret)) == 1
+		if trustedHeader {
+			if userIdStr := strings.TrimSpace(c.GetHeader("New-Api-User")); userIdStr != "" {
+				if userId, err := strconv.Atoi(userIdStr); err == nil && userId > 0 {
+					u, err := model.GetUserById(userId, false)
+					if err == nil && u != nil && u.Status == common.UserStatusEnabled {
+						c.Set("id", u.Id)
+						c.Set("username", u.Username)
+						c.Set("role", u.Role)
+						c.Next()
+						return
+					}
 				}
 			}
 		}
 
-		// 2. Fallback to standard UserAuth
+		// Fall back to the normal browser/session authentication path.
 		userAuth(c)
 	}
 }
@@ -54,7 +63,6 @@ func SetDistRouter(router *gin.Engine) {
 
 		distRouter.GET("/topup/info", controller.DistGetTopupInfo)
 		distRouter.POST("/topup/amount", controller.DistCalculateAmount)
-		distRouter.GET("/topup/crypto/status", controller.GetCryptoOrderStatus)
 
 		distRouter.POST("/user/register", controller.Register)
 		distRouter.POST("/user/login", controller.DistLogin)
@@ -81,8 +89,11 @@ func SetDistRouter(router *gin.Engine) {
 
 		authGroup.POST("/topup/crypto/pay", controller.CreateCryptoOrder)
 		authGroup.POST("/topup/crypto/submit", controller.SubmitCryptoTxHash)
+		authGroup.GET("/topup/crypto/status", controller.GetCryptoOrderStatus)
 		authGroup.POST("/topup/redeem", controller.DistRedeemCode)
 		authGroup.POST("/topup/pay", controller.RequestEpay)
+		authGroup.POST("/topup/stripe/pay", controller.RequestStripePay)
+		authGroup.POST("/topup/stripe/amount", controller.RequestStripeAmount)
 		authGroup.GET("/topup/history", controller.DistGetTopupHistory)
 
 		authGroup.POST("/package/subscribe", controller.DistSubscribePackage)

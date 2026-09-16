@@ -198,8 +198,9 @@ func GetCryptoOrderStatus(c *gin.Context) {
 	// If pending/processing and expired, mark as expired
 	if (order.Status == model.CryptoStatusPending || order.Status == model.CryptoStatusProcessing) &&
 		order.ExpiredAt > 0 && time.Now().Unix() > order.ExpiredAt {
-		_ = model.FailCryptoTransaction(tradeNo, "订单超时未完成")
+		_ = model.ExpireCryptoTransaction(tradeNo, "订单超时未完成")
 		order.Status = model.CryptoStatusExpired
+		order.FailReason = "订单超时未完成"
 	}
 
 	c.JSON(http.StatusOK, gin.H{

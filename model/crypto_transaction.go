@@ -195,7 +195,7 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 			Status:          "success",
 		}
 		if err := tx.Create(&topUpRecord).Error; err != nil {
-			common.SysLog(fmt.Sprintf("warning: failed to record topup history for crypto order %s: %v", tradeNo, err))
+			return fmt.Errorf("failed to record topup history: %w", err)
 		}
 
 		var user User
@@ -203,10 +203,14 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 			return fmt.Errorf("failed to lock user %d: %w", order.UserId, err)
 		}
 
-		if err := tx.Model(&User{}).
-			Where("id = ? AND quota <= ?", order.UserId, common.MaxWalletQuota-int(quotaAmount)).
-			Update("quota", gorm.Expr("quota + ?", quotaAmount)).Error; err != nil {
-			return fmt.Errorf("failed to increment user quota: %w", err)
+		result := tx.Model(&User{}).
+			Where("id = ? AND quota <= ?", order.UserId, int64(common.MaxWalletQuota)-quotaAmount).
+			Update("quota", gorm.Expr("quota + ?", quotaAmount))
+		if result.Error != nil {
+			return fmt.Errorf("failed to increment user quota: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("user quota capacity exceeded or user disappeared")
 		}
 
 		return nil
@@ -226,12 +230,22 @@ func FailCryptoTransaction(tradeNo string, reason string) error {
 
 func ExpirePendingCryptoTransactions(now int64) (int64, error) {
 	res := DB.Model(&CryptoTransaction{}).
-		Where("status = ? AND expired_at <= ?", CryptoStatusPending, now).
+		Where("status IN ? AND expired_at <= ?", []CryptoTransactionStatus{CryptoStatusPending, CryptoStatusProcessing}, now).
 		Updates(map[string]any{
 			"status":     CryptoStatusExpired,
 			"updated_at": now,
 		})
 	return res.RowsAffected, res.Error
+}
+
+func ExpireCryptoTransaction(tradeNo string, reason string) error {
+	return DB.Model(&CryptoTransaction{}).
+		Where("trade_no = ? AND status IN ?", tradeNo, []CryptoTransactionStatus{CryptoStatusPending, CryptoStatusProcessing}).
+		Updates(map[string]any{
+			"status":      CryptoStatusExpired,
+			"fail_reason": reason,
+			"updated_at":  time.Now().Unix(),
+		}).Error
 }
 
 func GetUserCryptoTransactions(userId int, page int, pageSize int) ([]*CryptoTransaction, int64, error) {

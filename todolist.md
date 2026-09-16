@@ -138,14 +138,14 @@
 ---
 
 ### 模块四：双轨智能网关分流（零垫资旧站流量接管）
-- [x] **4.1 网关 Key 探测与分流中间件** *(已在 `middleware/dist_gateway.go` + `service/dist_proxy.go` 完成并通过测试)*
+- [x] **4.1 网关 Key 探测与分流中间件** *(已在 `middleware/dist_gateway.go` + `service/dist_proxy.go` 完成并通过测试；2026-09-16 修复为旧 Key 只有在 SubRouter 明确额度耗尽后才切换本地，并持久化 exhausted 状态)*
   - [x] 在 `/v1/*` 核心中转路由前置检查 `Authorization: Bearer <key>`、`x-api-key`、`mj-api-secret` 等
   - [x] 校验逻辑：
     - 若 `<key>` 存在于本地且对应账户可用（已充值有配额） -> 执行本地 New API 渠道中转扣费
     - 若 `<key>` 在本地未查到（判定为旧站老用户 Key） -> 执行反向代理透传至 `https://apiroute.subrouter.ai/v1/*`
     - 若 `<key>` 属于迁移导入的老 Key 且新站额度为 0 -> 优先透传 SubRouter 扣除旧站残留余额，零垫资
   - [x] 透传时保留原始 HTTP Header、流式（SSE）长连接与超时配置 (`FlushInterval = -1`, `ResponseHeaderTimeout = 300s`)
-- [x] **4.2 旧额度耗尽与充值引导** *(已在 `service/dist_proxy.go` 完成并通过测试)*
+- [x] **4.2 旧额度耗尽与充值引导** *(已在 `service/dist_proxy.go` 完成并通过测试；2026-09-16 增加上游额度耗尽标记回传，避免本地余额提前垫付)*
   - [x] 捕获 SubRouter 返回的 `429 Insufficient Quota` 及额度不足错误
   - [x] 格式化向前端输出友好提示，引导用户前往 `https://www.api-route.com/topup` 充值
 - [x] **4.3 用户首次登录自迁移（密码与历史 Key 抓取）** *(已在 `service/dist_migration.go` + `controller/dist.go` 完成并通过测试)*
@@ -166,11 +166,15 @@
 
 ### 模块五：全链路联调验证与生产割接 (Verification & Cutover)
 - [ ] **5.1 本地联调测试**
-  - [ ] 修改 `api-route-deploy/vite.config.js` 的代理目标为本地开发后端
-  - [ ] 验证页面渲染：首页、模型广场、定价页面是否正常
-  - [ ] 验证用户流程：注册、登录、修改密码、创建 API Key
+  - [x] 已完成后端兼容路由编译检查、核心迁移/网关/链上验证定向测试、`api-route-deploy-new` 生产构建，以及本地代理、站点信息、注册、登录、用户信息和 API Key 创建联调。
+  - [x] 已配置临时 SQLite 渠道并使用运行时密钥完成真实 `/v1/chat/completions` 非流式与流式测试；前端代理转发、模型响应和本地额度扣减均正常。
+  - [x] 未修改只读生产前端；`api-route-deploy-new/vite.config.js` 的本地代理已指向 `http://127.0.0.1:3000` 验证。
+  - [ ] 验证页面渲染：首页、模型广场、定价页面是否正常（HTTP 接口已验证，浏览器视觉检查待补）。
+  - [x] 验证用户流程：注册、登录、获取用户信息、创建 API Key。
   - [ ] 验证充值流程：发起 USDT/USDC（Arb/Tron）充值、提交转账哈希、链上核验实际金额、自动充值到账
-  - [ ] 验证 API 调用：使用本地新 Key 请求 `/v1/chat/completions` 流式打字机测试
+  - [x] 验证 API 调用：使用本地新 Key 请求 `/v1/chat/completions` 非流式和流式打字机测试。
+  - [x] 验证零垫资路由边界：未知旧 Key 转发 SubRouter，收到上游 401 时本地用户额度未变化；网关定向回归测试通过。
+  - [x] 提交前核心定向测试通过；全量 `controller` 测试仍有既有 Windows/SQLite 临时库清理阶段的 `database is locked` / 文件占用失败，未发现本次改动相关失败。
 - [ ] **5.2 VPS 生产环境构建与部署**
   - [ ] 提交代码并由 GitHub Actions 自动构建部署至 VPS
   - [ ] 更新 VPS 的 Nginx 配置，确保 `/api/dist/*` 正确转发到 Go 后端容器

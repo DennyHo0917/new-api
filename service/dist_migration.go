@@ -2,13 +2,11 @@ package service
 
 import (
 	"bytes"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -238,7 +236,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 						CreatedTime:    createdTime,
 						AccessedTime:   common.GetTimestamp(),
 						ExpiredTime:    expiredTime,
-						Group:          "subrouter", // Tagged as legacy SubRouter key
+						Group:          model.LegacySubRouterGroup, // Tagged as legacy SubRouter key
 					}
 					if err := model.DB.Create(&migratedToken).Error; err == nil {
 						common.SysLog(fmt.Sprintf("[Migration] Imported token %s (%s) for user %d", name, cleanKey[:min(8, len(cleanKey))]+"...", localUser.Id))
@@ -295,9 +293,16 @@ func SyncCustomersFromRecords(records []SubRouterCustomerRecord) *SyncCustomersR
 		var existingUser model.User
 		var found bool
 
-		if email != "" {
-			if err := model.DB.Where("email = ?", email).First(&existingUser).Error; err == nil {
+		if c.Id > 0 {
+			if err := model.DB.Where("remark LIKE ?", fmt.Sprintf("%%SubRouter ID: %d,%%", c.Id)).First(&existingUser).Error; err == nil {
 				found = true
+			}
+		}
+		if email != "" {
+			if !found {
+				if err := model.DB.Where("email = ?", email).First(&existingUser).Error; err == nil {
+					found = true
+				}
 			}
 		}
 		if !found {
@@ -311,6 +316,10 @@ func SyncCustomersFromRecords(records []SubRouterCustomerRecord) *SyncCustomersR
 
 		if found {
 			needsSave := false
+			if c.Id > 0 && !strings.Contains(existingUser.Remark, fmt.Sprintf("SubRouter ID: %d,", c.Id)) {
+				existingUser.Remark = fmt.Sprintf("%s; SubRouter ID: %d, Old Quota: %d", strings.TrimSpace(existingUser.Remark), c.Id, c.Quota)
+				needsSave = true
+			}
 			if email != "" && existingUser.Email == "" {
 				existingUser.Email = email
 				needsSave = true
@@ -408,25 +417,9 @@ func SyncSubRouterCustomers(cookie string, distributorUID int) (*SyncCustomersRe
 		baseURL = "https://subrouter.ai"
 	}
 
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-		ForceAttemptHTTP2: false,
-		TLSNextProto:      make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
-	}
-	if proxyEnv := os.Getenv("HTTP_PROXY"); proxyEnv == "" {
-		if proxyEnv = os.Getenv("http_proxy"); proxyEnv == "" {
-			if pURL, err := url.Parse("http://127.0.0.1:7897"); err == nil {
-				transport.Proxy = http.ProxyURL(pURL)
-			}
-		}
-	}
-
 	client := &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: transport,
+		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 	}
 
 	var allRecords []SubRouterCustomerRecord
@@ -478,4 +471,3 @@ func SyncSubRouterCustomers(cookie string, distributorUID int) (*SyncCustomersRe
 	result := SyncCustomersFromRecords(allRecords)
 	return result, allRecords, nil
 }
-

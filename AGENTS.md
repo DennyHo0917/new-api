@@ -23,6 +23,17 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - JavaScript task plugins live in `plugins/tasks/`, run through `pkg/jsplugin/`, and integrate with host task polling and settlement.
 - `web/` is the React frontend (see `web/AGENTS.md`); `electron/` is the desktop wrapper.
 
+## API Route Takeover & Deployment Boundaries
+
+- This project is the self-hosted backend for the existing API Route distribution frontend.
+- Production frontend source at `D:\project\api-route-deploy` is read-only. Do not modify it. If a diagnostic or rollback operation requires touching it, create a reversible backup first and obtain explicit user approval.
+- The editable frontend is `D:\project\api-route-deploy-new`. Frontend changes belong there unless the user explicitly expands the scope.
+- The New API backend is `D:\project\api-route`. Local code may be inspected, tested, and modified here.
+- Do not log in to, edit, or deploy files directly on the VPS. The VPS is `149.88.86.52`; backend release is performed by pushing the approved backend changes to GitHub, after which the existing VPS automation deploys them.
+- Never write SSH passwords, session cookies, API keys, wallet secrets, database credentials, or other live credentials into source code, `AGENTS.md`, `todolist.md`, backups, test fixtures, logs, or commits. Read them from environment variables or the deployment secret store.
+- Any release must preserve the zero-capital migration rule: legacy SubRouter balances are never copied into local spendable quota. Legacy keys continue through SubRouter until an upstream quota-exhausted response is observed; only then may subsequent requests use local quota.
+- Before changing migration or routing behavior, update `todolist.md`, add focused regression coverage, and verify rollback behavior. Do not mark a task complete based only on compilation or a mocked upstream response.
+
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)

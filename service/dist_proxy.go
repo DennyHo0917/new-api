@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -19,6 +20,21 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/gin-gonic/gin"
 )
+
+type legacyQuotaMarkerKey struct{}
+
+// ProxyToSubRouter forwards the current request and reports whether the
+// upstream response was normalized as a legacy-quota exhaustion response.
+func ProxyToSubRouter(c *gin.Context) bool {
+	legacyQuotaExhausted := false
+	requestContext := context.WithValue(c.Request.Context(), legacyQuotaMarkerKey{}, &legacyQuotaExhausted)
+	c.Request = c.Request.WithContext(requestContext)
+	logger.LogInfo(c, fmt.Sprintf("[SubRouter Proxy] Forwarding %s %s to SubRouter upstream", c.Request.Method, c.Request.URL.Path))
+	proxy := GetSubRouterReverseProxy()
+	proxy.ServeHTTP(c.Writer, c.Request)
+	c.Abort()
+	return legacyQuotaExhausted
+}
 
 var (
 	subRouterProxyOnce sync.Once
@@ -74,8 +90,15 @@ func GetSubRouterReverseProxy() *httputil.ReverseProxy {
 
 		// Intercept 429 Insufficient Quota errors from SubRouter
 		proxy.ModifyResponse = func(resp *http.Response) error {
+			var legacyQuotaExhausted *bool
+			if resp.Request != nil {
+				legacyQuotaExhausted, _ = resp.Request.Context().Value(legacyQuotaMarkerKey{}).(*bool)
+			}
 			// SubRouter returns 429 Too Many Requests or 402 Payment Required on quota exhaustion
 			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
+				if legacyQuotaExhausted != nil {
+					*legacyQuotaExhausted = true
+				}
 				_ = resp.Body.Close()
 				errPayload := fmt.Sprintf(`{"error":{"message":"%s","type":"insufficient_quota","param":"","code":"insufficient_user_quota"}}`, QuotaExhaustedMessage)
 				resp.StatusCode = http.StatusTooManyRequests
@@ -94,6 +117,9 @@ func GetSubRouterReverseProxy() *httputil.ReverseProxy {
 				if err == nil {
 					bodyStr := strings.ToLower(string(bodyBytes))
 					if strings.Contains(bodyStr, "quota") || strings.Contains(bodyStr, "额度") || strings.Contains(bodyStr, "balance") {
+						if legacyQuotaExhausted != nil {
+							*legacyQuotaExhausted = true
+						}
 						_ = resp.Body.Close()
 						errPayload := fmt.Sprintf(`{"error":{"message":"%s","type":"insufficient_quota","param":"","code":"insufficient_user_quota"}}`, QuotaExhaustedMessage)
 						resp.StatusCode = http.StatusTooManyRequests
@@ -122,12 +148,4 @@ func GetSubRouterReverseProxy() *httputil.ReverseProxy {
 		subRouterProxy = proxy
 	})
 	return subRouterProxy
-}
-
-// ProxyToSubRouter forwards the current HTTP request to SubRouter transparently
-func ProxyToSubRouter(c *gin.Context) {
-	logger.LogInfo(c, fmt.Sprintf("[SubRouter Proxy] Forwarding %s %s to SubRouter upstream", c.Request.Method, c.Request.URL.Path))
-	proxy := GetSubRouterReverseProxy()
-	proxy.ServeHTTP(c.Writer, c.Request)
-	c.Abort()
 }

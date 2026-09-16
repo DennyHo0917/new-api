@@ -74,19 +74,28 @@ func DistDualTrackGateway() gin.HandlerFunc {
 		userEnabled := user.Status == common.UserStatusEnabled
 		tokenEnabled := token.Status == common.TokenStatusEnabled
 		tokenNotExpired := token.ExpiredTime == -1 || token.ExpiredTime > common.GetTimestamp()
+		if !userEnabled || !tokenEnabled || !tokenNotExpired {
+			c.Next()
+			return
+		}
+
+		// Legacy keys stay on SubRouter until that upstream explicitly reports
+		// quota exhaustion. This prevents local funds from paying old balances.
+		if model.IsLegacySubRouterToken(token) && !model.IsLegacySubRouterExhausted(token) {
+			if service.ProxyToSubRouter(c) {
+				if err := model.MarkLegacySubRouterTokenExhausted(token.Id); err != nil {
+					common.SysError("failed to mark legacy token exhausted: " + err.Error())
+				}
+			}
+			return
+		}
+
 		tokenHasQuota := token.UnlimitedQuota || token.RemainQuota > 0
 		userHasQuota := user.Quota > 0
 
 		// Local account is active and has positive quota -> route locally
 		if userEnabled && tokenEnabled && tokenNotExpired && tokenHasQuota && userHasQuota {
 			c.Next()
-			return
-		}
-
-		// If local quota is 0 and this key was migrated from SubRouter -> route to SubRouter to consume old balance
-		isSubRouterToken := token.Group == "subrouter" || strings.Contains(strings.ToLower(token.Name), "subrouter")
-		if isSubRouterToken && user.Quota <= 0 {
-			service.ProxyToSubRouter(c)
 			return
 		}
 

@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -78,6 +80,39 @@ type TronTxInfoResponse struct {
 	Receipt TronReceipt     `json:"receipt"`
 	Log     []TronTxInfoLog `json:"log"`
 	Result  string          `json:"result"`
+}
+
+func decodeTronAddress(address string) (string, error) {
+	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	clean := strings.TrimSpace(address)
+	if clean == "" {
+		return "", errors.New("empty tron address")
+	}
+
+	value := new(big.Int)
+	base := big.NewInt(58)
+	for _, char := range clean {
+		index := strings.IndexRune(alphabet, char)
+		if index < 0 {
+			return "", fmt.Errorf("invalid tron address character")
+		}
+		value.Mul(value, base)
+		value.Add(value, big.NewInt(int64(index)))
+	}
+
+	decoded := value.Bytes()
+	for len(decoded) < 25 {
+		decoded = append([]byte{0}, decoded...)
+	}
+	if len(decoded) != 25 || decoded[0] != 0x41 {
+		return "", errors.New("invalid tron address payload")
+	}
+	first := sha256.Sum256(decoded[:21])
+	second := sha256.Sum256(first[:])
+	if !bytes.Equal(decoded[21:], second[:4]) {
+		return "", errors.New("invalid tron address checksum")
+	}
+	return hex.EncodeToString(decoded[1:21]), nil
 }
 
 // VerifyArbitrumReceipt verifies an EVM transaction receipt from Arbitrum One.
@@ -184,6 +219,14 @@ func VerifyTronTxInfo(info *TronTxInfoResponse, targetContract string, targetWal
 	if info.Receipt.Result != "" && info.Receipt.Result != "SUCCESS" {
 		return "", 0, fmt.Errorf("tron transaction execution failed: %s", info.Receipt.Result)
 	}
+	targetContractHex, err := decodeTronAddress(targetContract)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid target tron contract: %w", err)
+	}
+	targetWalletHex, err := decodeTronAddress(targetWallet)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid target tron wallet: %w", err)
+	}
 
 	for _, l := range info.Log {
 		if len(l.Topics) < 3 {
@@ -192,6 +235,17 @@ func VerifyTronTxInfo(info *TronTxInfoResponse, targetContract string, targetWal
 
 		topic0 := strings.ToLower(l.Topics[0])
 		if topic0 != TransferTopicNo0x && topic0 != strings.ToLower(TransferEventSignature) {
+			continue
+		}
+		logContract := strings.TrimPrefix(strings.ToLower(l.Address), "0x")
+		if len(logContract) == 42 && strings.HasPrefix(logContract, "41") {
+			logContract = logContract[2:]
+		}
+		if logContract != targetContractHex {
+			continue
+		}
+		toTopic := strings.TrimPrefix(strings.ToLower(l.Topics[2]), "0x")
+		if len(toTopic) < 40 || toTopic[len(toTopic)-40:] != targetWalletHex {
 			continue
 		}
 
@@ -207,7 +261,7 @@ func VerifyTronTxInfo(info *TronTxInfoResponse, targetContract string, targetWal
 		divisor := big.NewInt(1000000)
 		amountFloat, _ := new(big.Float).Quo(new(big.Float).SetInt(amountBig), new(big.Float).SetInt(divisor)).Float64()
 
-		fromTopic := l.Topics[1]
+		fromTopic := strings.TrimPrefix(strings.ToLower(l.Topics[1]), "0x")
 		if len(fromTopic) >= 40 {
 			fromTopic = fromTopic[len(fromTopic)-40:]
 		}
@@ -286,7 +340,10 @@ func QueryTronTransaction(ctx context.Context, txHash string, apiKey string, tar
 					if err := common.Unmarshal(bodyBytes, &eventResp); err == nil && eventResp.Success && len(eventResp.Data) > 0 {
 						from, amount, verifyErr := VerifyTronEvents(eventResp.Data, targetContract, targetWallet)
 						if verifyErr == nil && amount > 0 {
-							return from, amount, nil
+							info, infoErr := queryTronTransactionInfo(ctx, cleanTxHash, apiKey)
+							if infoErr == nil && (info.Receipt.Result == "" || info.Receipt.Result == "SUCCESS") {
+								return from, amount, nil
+							}
 						}
 					}
 				}
@@ -295,16 +352,24 @@ func QueryTronTransaction(ctx context.Context, txHash string, apiKey string, tar
 	}
 
 	// Fallback to wallet/gettransactioninfobyid
-	infoUrl := "https://api.trongrid.io/wallet/gettransactioninfobyid"
-	postData := map[string]string{"value": cleanTxHash}
-	postBytes, err := common.Marshal(postData)
+	infoResp, err := queryTronTransactionInfo(ctx, cleanTxHash, apiKey)
 	if err != nil {
 		return "", 0, err
 	}
+	return VerifyTronTxInfo(infoResp, targetContract, targetWallet)
+}
 
-	req, err = http.NewRequestWithContext(ctx, http.MethodPost, infoUrl, bytes.NewReader(postBytes))
+func queryTronTransactionInfo(ctx context.Context, txHash string, apiKey string) (*TronTxInfoResponse, error) {
+	infoUrl := "https://api.trongrid.io/wallet/gettransactioninfobyid"
+	postData := map[string]string{"value": strings.TrimPrefix(txHash, "0x")}
+	postBytes, err := common.Marshal(postData)
 	if err != nil {
-		return "", 0, err
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, infoUrl, bytes.NewReader(postBytes))
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if apiKey != "" {
@@ -313,21 +378,20 @@ func QueryTronTransaction(ctx context.Context, txHash string, apiKey string, tar
 
 	resp, err := cryptoHTTPClient.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to query tron node: %w", err)
+		return nil, fmt.Errorf("failed to query tron node: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", 0, fmt.Errorf("failed to read tron node response: %w", err)
+		return nil, fmt.Errorf("failed to read tron node response: %w", err)
 	}
 
 	var infoResp TronTxInfoResponse
 	if err := common.Unmarshal(respBytes, &infoResp); err != nil {
-		return "", 0, fmt.Errorf("failed to unmarshal tron node response: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal tron node response: %w", err)
 	}
-
-	return VerifyTronTxInfo(&infoResp, targetContract, targetWallet)
+	return &infoResp, nil
 }
 
 // VerifyAndSettleCryptoTx orchestrates the on-chain verification and atomic quota settlement.

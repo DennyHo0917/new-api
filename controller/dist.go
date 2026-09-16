@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,7 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // DistGetSiteInfo handles GET /api/dist/site/info
@@ -80,9 +83,11 @@ func DistGetSiteModels(c *gin.Context) {
 
 // DistGetSitePricing handles GET /api/dist/site/pricing
 func DistGetSitePricing(c *gin.Context) {
+	pricing := model.GetPricing()
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    []any{},
+		"success":     true,
+		"data":        pricing,
+		"group_ratio": ratio_setting.GetGroupRatioCopy(),
 	})
 }
 
@@ -162,7 +167,17 @@ func DistCalculateAmount(c *gin.Context) {
 		return
 	}
 
-	quota := int64(req.Amount * common.QuotaPerUnit)
+	if req.Amount <= 0 || math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "充值金额无效"})
+		return
+	}
+	quota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromFloat(req.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "充值金额超出范围"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -503,7 +518,15 @@ func DistSubscribePackage(c *gin.Context) {
 	}
 
 	// Calculate cost in Quota (assume price in CNY, 1 USD = 7 CNY = 500,000 Quota)
-	costQuota := int((pkg.Price / 7.0) * common.QuotaPerUnit)
+	costQuota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromFloat(pkg.Price).
+			Div(decimal.NewFromFloat(7)).
+			Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil || costQuota < 0 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "套餐价格无效"})
+		return
+	}
 	if user.Quota < costQuota {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "余额不足，请先充值"})
 		return
