@@ -23,8 +23,8 @@ var cryptoSetting = CryptoSetting{
 	CryptoExpiryMinutes: 30,
 	CryptoMinTopUp:      1.0,
 	CryptoWallets: map[string]string{
-		"tron": "",
-		"arb":  "",
+		"tron": "TV8FyJ72SmYr8zJVvhWKqFKEa1yDLgVBgv",
+		"arb":  "0x56a3ff56e79394e34834188a6e83a5d219984eb2",
 	},
 	ContractAddresses: map[string]map[string]string{
 		"tron": {

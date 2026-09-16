@@ -61,7 +61,7 @@
 ---
 
 ### 模块二：基于 TxHash 链上验证与实际金额入账引擎 (Crypto Engine via TxHash)
-- [x] **2.1 订单创建接口 (`POST /api/dist/topup/crypto/pay`)** *(已在 `controller/crypto.go` 完成)*
+- [x] **2.1 订单创建接口 (`POST /api/dist/topup/crypto/pay`)** *(已在 `controller/crypto.go` 完成；已补充 NaN/Inf/正数/系统上限校验，Arbitrum 与 TRON 收款地址已配置为默认公开地址，仍可由环境变量覆盖)*
   - [x] 鉴权校验（解析登录态，获取当前用户 ID）
   - [x] 入参校验：充值金额 `amount`、选择的链 `chain`（`arb` / `tron`）、代币 `token`（`USDT` / `USDC`）
   - [x] 生成订单入库（初始状态 `pending`），返回平台对应的收款钱包地址、订单号 `trade_no` 及有效时间
@@ -92,7 +92,7 @@
     - [x] 更新订单状态为 `success`，写入 `actual_amount` 与 `quota_amount`
     - [x] 写入充值历史记录（`top_ups`）
   - [x] 事务提交，实时生效
-- [x] **2.5 订单状态轮询接口 (`GET /api/dist/topup/crypto/status`)** *(已在 `controller/crypto.go` 完成)*
+- [x] **2.5 订单状态轮询接口 (`GET /api/dist/topup/crypto/status`)** *(已在 `controller/crypto.go` 完成；已补充当前用户订单归属校验，阻止跨用户读取订单状态、TxHash 与到账信息)*
   - [x] 接收 `trade_no`，返回当前订单的最新状态（`pending` / `processing` / `success` / `failed` / `expired`）以及实际到账数额 `actual_amount`
   - [x] 适配前端轮询，检测到 `success` 立即弹窗提示并刷新前端余额
 - [x] **2.6 前端交互适配 (`Topup.jsx` 扩展提交 TxHash)** *(已在 `api-route-deploy-new` 完成并构建成功)*

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,12 @@ func CreateCryptoOrder(c *gin.Context) {
 	cfg := operation_setting.GetCryptoSetting()
 	if !cfg.EnableCrypto {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "加密货币充值暂未开放"})
+		return
+	}
+
+	maxAmount := float64(common.MaxWalletQuota) / common.QuotaPerUnit
+	if math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) || req.Amount <= 0 || req.Amount > maxAmount {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "充值金额必须为有效的正数且不能超过系统上限"})
 		return
 	}
 
@@ -192,6 +199,10 @@ func GetCryptoOrderStatus(c *gin.Context) {
 	order, err := model.GetCryptoTransactionByTradeNo(tradeNo)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "订单不存在"})
+		return
+	}
+	if order.UserId != c.GetInt("id") {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "无权访问该订单"})
 		return
 	}
 
