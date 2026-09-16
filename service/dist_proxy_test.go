@@ -202,3 +202,87 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, user.Id, token.UserId)
 	assert.Equal(t, "subrouter", token.Group, "Migrated token must have group tagged as subrouter")
 }
+
+func TestSyncCustomersFromRecords(t *testing.T) {
+	// Initialize test database
+	common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, os.Setenv("SQL_DSN", "local"))
+	require.NoError(t, model.InitDB())
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}))
+
+	defer func() {
+		if sqlDB, err := model.DB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+		_ = os.Unsetenv("SQL_DSN")
+	}()
+
+	records := []SubRouterCustomerRecord{
+		{
+			Id:          1001,
+			Username:    "alice",
+			DisplayName: "Alice Smith",
+			Email:       "alice@example.com",
+			Status:      1,
+			Quota:       50000,
+			UsedQuota:   12000,
+		},
+		{
+			Id:          1002,
+			Username:    "alice", // Collision on username
+			DisplayName: "Alice Two",
+			Email:       "alice2@example.com",
+			Status:      1,
+			Quota:       30000,
+			UsedQuota:   5000,
+		},
+		{
+			Id:          1003,
+			Username:    "bob",
+			DisplayName: "Bob Jones",
+			Email:       "bob@example.com",
+			Status:      1,
+			Quota:       0,
+			UsedQuota:   0,
+		},
+	}
+
+	result := SyncCustomersFromRecords(records)
+	assert.Equal(t, 3, result.TotalFetched)
+	assert.Equal(t, 3, result.TotalInserted)
+	assert.Equal(t, 0, result.TotalFailed)
+
+	// Verify Alice 1
+	var u1 model.User
+	require.NoError(t, model.DB.Where("email = ?", "alice@example.com").First(&u1).Error)
+	assert.Equal(t, "alice", u1.Username)
+	assert.Equal(t, 0, u1.Quota, "Strict zero-capital invariant")
+	assert.NotEmpty(t, u1.AffCode)
+	assert.Contains(t, u1.Remark, "SubRouter ID: 1001")
+
+	// Verify Alice 2 (deduplicated username)
+	var u2 model.User
+	require.NoError(t, model.DB.Where("email = ?", "alice2@example.com").First(&u2).Error)
+	assert.Equal(t, "alice_1002", u2.Username)
+	assert.NotEqual(t, u1.AffCode, u2.AffCode, "AffCodes must be unique")
+
+	// Verify update path (idempotency)
+	recordsUpdate := []SubRouterCustomerRecord{
+		{
+			Id:          1001,
+			Username:    "alice",
+			DisplayName: "Alice Updated",
+			Email:       "alice@example.com",
+			Status:      1,
+		},
+	}
+	resultUpdate := SyncCustomersFromRecords(recordsUpdate)
+	assert.Equal(t, 1, resultUpdate.TotalUpdated)
+	assert.Equal(t, 0, resultUpdate.TotalInserted)
+	assert.Equal(t, 0, resultUpdate.TotalFailed)
+
+	var u1Updated model.User
+	require.NoError(t, model.DB.Where("email = ?", "alice@example.com").First(&u1Updated).Error)
+	assert.Equal(t, "Alice Updated", u1Updated.DisplayName)
+}

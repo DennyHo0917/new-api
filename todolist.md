@@ -152,6 +152,15 @@
   - [x] 用户登录时若本地未录入密码，先代理向上游 SubRouter 验证凭据
   - [x] 验证成功自动将密码加密存入本地库（严格设置初始 Quota = 0，恪守零垫资原则）
   - [x] 利用已认证 Session 自动抓取导入该用户的历史 API Key 列表，并打标 `Group = "subrouter"`
+- [x] **4.4 SubRouter 历史存量客户全量同步工具与数据库写入** *(已完成)*
+  - [x] 逆向/解析 SubRouter 分销商管理鉴权机制（Session Cookie + `New-Api-User: 4870` 请求头）
+  - [x] 开发 `cmd/sync_customers` CLI 批量同步与入库工具，支持在线拉取与本地快照载入
+  - [x] 成功抓取全部 520 位存量客户数据，生成完整数据快照 `subrouter_customers_backup.json`
+  - [x] 全量 520 位客户写入本地数据库 `users` 表，实现 0 失败率：
+    - [x] 针对同名/冲突用户名自动按客户 ID 进行唯一化重命名（如 `poc_20093`）
+    - [x] 批量生成全局唯一 `aff_code`，规避数据库唯一索引约束冲突
+    - [x] 严格落实“零垫资”防线（新站 Quota 一律设为 0，历史配额与使用量存证于 `Setting` 与 `Remark`）
+    - [x] 单元测试 `TestSyncCustomersFromRecords` 100% 覆盖并验证写入与更新幂等性
 
 ---
 
