@@ -38,6 +38,12 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 
 ## Rules
 
+### Task Progress & TodoList Management (Mandatory / 任务管理强制约束)
+
+- The development plan and task items for taking over `api-route-deploy` are strictly maintained in `todolist.md`.
+- **Mandatory Progress Tracking**: Whenever any task item or subtask in `todolist.md` is implemented, verified, or completed, the agent MUST immediately update `todolist.md`, marking the corresponding item from `[ ]` to `[x]` (and noting completion details/commit references where appropriate).
+- An agent MUST NOT proceed to subsequent tasks without keeping `todolist.md` accurately updated.
+
 ### Common Code Quality
 
 - New code should stay direct and readable. Prefer early returns, clear branches, and well-named local variables to deep nesting or layered control flow.
