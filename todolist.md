@@ -178,7 +178,7 @@
   - [x] 验证零垫资路由边界：未知旧 Key 转发 SubRouter，收到上游 401 时本地用户额度未变化；网关定向回归测试通过。
   - [x] 提交前核心定向测试通过；全量 `controller` 测试仍有既有 Windows/SQLite 临时库清理阶段的 `database is locked` / 文件占用失败，未发现本次改动相关失败。
 - [ ] **5.2 VPS 生产环境构建与部署**
-  - [ ] 提交代码并由 GitHub Actions 自动构建部署至 VPS
+  - [x] 提交代码并由 GitHub Actions 自动构建部署至 VPS（提交 `686dce6df`，Deploy API Route #6 成功，耗时 3m56s）
   - [ ] 更新 VPS 的 Nginx 配置，确保 `/api/dist/*` 正确转发到 Go 后端容器
   - [ ] 配置链上验证所需的 RPC 节点、API Key 与平台收款钱包地址
 - [ ] **5.3 前端生产切流割接**
