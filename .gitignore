@@ -47,3 +47,6 @@ go.work.sum
 subrouter_customers_backup.json
 client-key*
 .env.runtime
+AGENTS.md
+agents.md
+todolist.md

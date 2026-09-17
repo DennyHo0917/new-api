@@ -9,6 +9,9 @@ docs
 .gocache
 client-key*
 .env.runtime
+AGENTS.md
+agents.md
+todolist.md
 /web/node_modules
 /web/dist
 !THIRD-PARTY-LICENSES.md
