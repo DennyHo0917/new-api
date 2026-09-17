@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -165,8 +163,8 @@ func environmentProviderConfig(config *model.CustomOAuthProvider) *model.CustomO
 	copy := *config
 	switch copy.Slug {
 	case "google":
-		clientID := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
-		clientSecret := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET"))
+		clientID := common.GetSecretEnv("GOOGLE_CLIENT_ID")
+		clientSecret := common.GetSecretEnv("GOOGLE_CLIENT_SECRET")
 		if clientID == "" || clientSecret == "" {
 			if copy.ClientSecret == "" {
 				copy.Enabled = false
@@ -187,8 +185,8 @@ func environmentProviderConfig(config *model.CustomOAuthProvider) *model.CustomO
 		copy.EmailField = "email"
 		copy.AuthStyle = AuthStyleInParams
 	case "x":
-		clientID := strings.TrimSpace(os.Getenv("X_CLIENT_ID"))
-		clientSecret := strings.TrimSpace(os.Getenv("X_CLIENT_SECRET"))
+		clientID := common.GetSecretEnv("X_CLIENT_ID")
+		clientSecret := common.GetSecretEnv("X_CLIENT_SECRET")
 		if clientID == "" || clientSecret == "" {
 			if copy.ClientSecret == "" {
 				copy.Enabled = false

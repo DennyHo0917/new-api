@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/base64"
 	"maps"
 	"testing"
 
@@ -27,7 +28,8 @@ func TestEnvironmentOptionOverridesWinWithoutPersisting(t *testing.T) {
 	common.OptionMap = map[string]string{}
 	t.Setenv("SERVER_ADDRESS", "https://www.api-route.com")
 	t.Setenv("ZPAY_GATEWAY_URL", "")
-	t.Setenv("ZPAY_MERCHANT_ID", "merchant-id")
+	t.Setenv("ZPAY_MERCHANT_ID", "")
+	t.Setenv("ZPAY_MERCHANT_ID_B64", base64.StdEncoding.EncodeToString([]byte("merchant-id")))
 	t.Setenv("ZPAY_MERCHANT_KEY", "merchant-key")
 	t.Setenv("STRIPE_SECRET_KEY", "stripe-secret")
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "webhook-secret")
@@ -50,4 +52,13 @@ func TestEnvironmentOptionOverridesWinWithoutPersisting(t *testing.T) {
 	assert.NotContains(t, common.OptionMap, "StripeApiSecret")
 	assert.NotContains(t, common.OptionMap, "EpayKey")
 	assert.NotContains(t, common.OptionMap, "GitHubClientSecret")
+}
+
+func TestGetSecretEnvPrefersPlaintextAndSupportsBase64(t *testing.T) {
+	t.Setenv("NEW_API_TEST_SECRET", "")
+	t.Setenv("NEW_API_TEST_SECRET_B64", base64.StdEncoding.EncodeToString([]byte("encoded-secret")))
+	assert.Equal(t, "encoded-secret", common.GetSecretEnv("NEW_API_TEST_SECRET"))
+
+	t.Setenv("NEW_API_TEST_SECRET", "plain-secret")
+	assert.Equal(t, "plain-secret", common.GetSecretEnv("NEW_API_TEST_SECRET"))
 }

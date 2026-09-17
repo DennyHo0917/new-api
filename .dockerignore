@@ -8,6 +8,7 @@ docs
 .eslintcache
 .gocache
 client-key*
+.env.runtime
 /web/node_modules
 /web/dist
 !THIRD-PARTY-LICENSES.md

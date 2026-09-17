@@ -1,9 +1,11 @@
 package common
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func GetEnvOrDefault(env string, defaultValue int) int {
@@ -35,4 +37,23 @@ func GetEnvOrDefaultBool(env string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return b
+}
+
+// GetSecretEnv reads a deployment secret from the process environment. The
+// *_B64 form is used by the deployment workflow when a secret must cross an
+// SSH boundary without appearing in a command argument or shell source.
+func GetSecretEnv(env string) string {
+	if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+		return value
+	}
+	encoded := strings.TrimSpace(os.Getenv(env + "_B64"))
+	if encoded == "" {
+		return ""
+	}
+	value, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		SysError(fmt.Sprintf("failed to decode %s_B64", env))
+		return ""
+	}
+	return strings.TrimSpace(string(value))
 }

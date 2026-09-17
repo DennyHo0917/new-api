@@ -46,3 +46,4 @@ go.work
 go.work.sum
 subrouter_customers_backup.json
 client-key*
+.env.runtime

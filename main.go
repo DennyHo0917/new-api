@@ -297,6 +297,9 @@ func InitResources() error {
 			common.SysLog("No .env file found, using default environment variables. If needed, please create a .env file and set the relevant variables.")
 		}
 	}
+	// Deployment automation may place an ephemeral, mode-0600 secret bundle in
+	// the mounted data directory. It is intentionally not part of the image.
+	_ = godotenv.Overload(".env.runtime")
 
 	// 加载环境变量
 	common.InitEnv()
