@@ -65,6 +65,7 @@
   - [x] 鉴权校验（解析登录态，获取当前用户 ID）
   - [x] 入参校验：充值金额 `amount`、选择的链 `chain`（`arb` / `tron`）、代币 `token`（`USDT` / `USDC`）
   - [x] 生成订单入库（初始状态 `pending`），返回平台对应的收款钱包地址、订单号 `trade_no` 及有效时间
+  - [x] 加密货币最低充值默认值调整为 $5
 - [x] **2.2 用户提交交易哈希接口 (`POST /api/dist/topup/crypto/submit`)** *(已在 `controller/crypto.go` 完成)*
   - [x] 入参：`trade_no`（订单号）、`tx_hash`（用户转账后的交易哈希）
   - [x] 防重校验：检查数据库中该 `tx_hash` 是否已被使用，防止重放攻击
@@ -130,6 +131,7 @@
   - [x] `POST /api/dist/topup/redeem`：卡密/兑换码兑换额度接口
   - [x] `POST /api/dist/topup/pay`：易支付（微信/支付宝）下单对接
   - [x] `POST /api/dist/topup/stripe/pay`：Stripe 信用卡支付对接
+  - [x] 分站兼容接口按 Stripe API/Webhook/Price 与合规配置动态启用 Stripe，最低充值默认值调整为 $5
   - [x] `GET /api/dist/topup/history`：充值记录明细查询
 - [x] **3.6 套餐购买与订阅结算 (`/api/dist/package/*`)** *(已在 `controller/dist.go` 完成)*
   - [x] `POST /api/dist/package/subscribe`：套餐扣减余额购买与激活逻辑

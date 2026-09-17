@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ import (
 // DistGetSiteInfo handles GET /api/dist/site/info
 func DistGetSiteInfo(c *gin.Context) {
 	cryptoCfg := operation_setting.GetCryptoSetting()
+	stripeEnabled := isStripeTopUpEnabled()
 
 	siteName := common.SystemName
 	if siteName == "" {
@@ -35,7 +37,7 @@ func DistGetSiteInfo(c *gin.Context) {
 			"enable_topup":        true,
 			"enable_online_topup": true,
 			"enable_crypto_topup": cryptoCfg.EnableCrypto,
-			"enable_stripe_topup": false,
+			"enable_stripe_topup": stripeEnabled,
 			"enable_creem_topup":  false,
 			"allow_sub_dist":      false,
 			"currency": gin.H{
@@ -133,6 +135,20 @@ func DistGetSubDistributorInfo(c *gin.Context) {
 // DistGetTopupInfo handles GET /api/dist/topup/info
 func DistGetTopupInfo(c *gin.Context) {
 	cryptoCfg := operation_setting.GetCryptoSetting()
+	stripeEnabled := isStripeTopUpEnabled()
+	payMethods := []gin.H{
+		{
+			"name": "加密货币充值 (Arbitrum One / TRC20)",
+			"type": "crypto",
+		},
+	}
+	if stripeEnabled {
+		payMethods = append(payMethods, gin.H{
+			"name":      "Stripe",
+			"type":      "stripe",
+			"min_topup": setting.StripeMinTopUp,
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -140,15 +156,11 @@ func DistGetTopupInfo(c *gin.Context) {
 			"min_topup":             cryptoCfg.CryptoMinTopUp,
 			"enable_online_topup":   true,
 			"enable_crypto_topup":   cryptoCfg.EnableCrypto,
-			"enable_stripe_topup":   false,
+			"enable_stripe_topup":   stripeEnabled,
 			"enable_creem_topup":    false,
 			"crypto_expiry_minutes": cryptoCfg.CryptoExpiryMinutes,
-			"pay_methods": []gin.H{
-				{
-					"name": "加密货币充值 (Arbitrum One / TRC20)",
-					"type": "crypto",
-				},
-			},
+			"stripe_min_topup":      setting.StripeMinTopUp,
+			"pay_methods":           payMethods,
 			"crypto_wallets": gin.H{
 				"tron": cryptoCfg.GetWalletAddress("tron"),
 				"arb":  cryptoCfg.GetWalletAddress("arb"),

@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,6 +45,45 @@ func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 
 	setting.StripePriceId = ""
 	require.False(t, isStripeWebhookEnabled())
+}
+
+func TestDistTopupInfoIncludesConfiguredStripe(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalAPISecret := setting.StripeApiSecret
+	originalWebhookSecret := setting.StripeWebhookSecret
+	originalPriceID := setting.StripePriceId
+	originalMinTopUp := setting.StripeMinTopUp
+	t.Cleanup(func() {
+		setting.StripeApiSecret = originalAPISecret
+		setting.StripeWebhookSecret = originalWebhookSecret
+		setting.StripePriceId = originalPriceID
+		setting.StripeMinTopUp = originalMinTopUp
+	})
+
+	setting.StripeApiSecret = "sk_test_123"
+	setting.StripeWebhookSecret = "whsec_test"
+	setting.StripePriceId = "price_123"
+	setting.StripeMinTopUp = 5
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	DistGetTopupInfo(ctx)
+
+	var response struct {
+		Data struct {
+			EnableStripe   bool `json:"enable_stripe_topup"`
+			StripeMinTopUp int  `json:"stripe_min_topup"`
+			PayMethods     []struct {
+				Type string `json:"type"`
+			} `json:"pay_methods"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Data.EnableStripe)
+	require.Equal(t, 5, response.Data.StripeMinTopUp)
+	require.Contains(t, response.Data.PayMethods, struct {
+		Type string `json:"type"`
+	}{Type: "stripe"})
 }
 
 func TestCreemWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
