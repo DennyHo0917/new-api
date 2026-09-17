@@ -209,3 +209,35 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	operation_setting.PayMethods = nil
 	require.False(t, isEpayWebhookEnabled())
 }
+
+func TestDistTopupInfoIncludesConfiguredEpayMethods(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalPayAddress, originalEpayID, originalEpayKey := operation_setting.PayAddress, operation_setting.EpayId, operation_setting.EpayKey
+	originalPayMethods := operation_setting.PayMethods
+	t.Cleanup(func() {
+		operation_setting.PayAddress, operation_setting.EpayId, operation_setting.EpayKey = originalPayAddress, originalEpayID, originalEpayKey
+		operation_setting.PayMethods = originalPayMethods
+	})
+	operation_setting.PayAddress = "https://zpayz.cn"
+	operation_setting.EpayId = "merchant-id"
+	operation_setting.EpayKey = "merchant-key"
+	operation_setting.PayMethods = []map[string]string{{"name": "支付宝", "type": "alipay", "icon": "SiAlipay"}}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	DistGetTopupInfo(ctx)
+
+	var response struct {
+		Data struct {
+			EnableOnlineTopup bool `json:"enable_online_topup"`
+			PayMethods        []struct {
+				Type string `json:"type"`
+			} `json:"pay_methods"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Data.EnableOnlineTopup)
+	require.Contains(t, response.Data.PayMethods, struct {
+		Type string `json:"type"`
+	}{Type: "alipay"})
+}

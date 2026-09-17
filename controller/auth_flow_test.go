@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -700,6 +701,52 @@ func TestGenerateOAuthCodeCarriesAffiliateInLoginFlow(t *testing.T) {
 	assert.Equal(t, "invite-code", payload.AffiliateCode)
 	assert.Zero(t, flow.UserId)
 	assert.Empty(t, flow.SessionId)
+}
+
+func TestDistOAuthStartUsesSingleUseStateAndPKCE(t *testing.T) {
+	setupAuthFlowControllerTest(t)
+	previousAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://www.api-route.com"
+	t.Cleanup(func() { system_setting.ServerAddress = previousAddress })
+
+	provider := oauth.NewGenericOAuthProvider(&model.CustomOAuthProvider{
+		Id:                    42,
+		Name:                  "Google",
+		Slug:                  "google",
+		Enabled:               true,
+		ClientId:              "public-client-id",
+		AuthorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+		Scopes:                "openid email profile",
+	})
+	require.NoError(t, oauth.RegisterCustom("google", provider))
+	t.Cleanup(func() { oauth.UnregisterCustomProvider("google") })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "provider", Value: "google"}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/dist/oauth/google/start?aff=invite-code", nil)
+
+	DistOAuthStart(c)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	authorizeURL, err := url.Parse(recorder.Header().Get("Location"))
+	require.NoError(t, err)
+	query := authorizeURL.Query()
+	assert.Equal(t, "public-client-id", query.Get("client_id"))
+	assert.Equal(t, "https://www.api-route.com/oauth/google", query.Get("redirect_uri"))
+	assert.Equal(t, "S256", query.Get("code_challenge_method"))
+	require.NotEmpty(t, query.Get("code_challenge"))
+
+	flow, err := model.GetAuthFlow(query.Get("state"), model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "google", Intent: model.AuthFlowIntentLogin,
+	})
+	require.NoError(t, err)
+	var payload oauthFlowPayload
+	require.NoError(t, common.UnmarshalJsonStr(flow.Payload, &payload))
+	assert.Equal(t, "invite-code", payload.AffiliateCode)
+	require.NotEmpty(t, payload.CodeVerifier)
+	challenge := sha256.Sum256([]byte(payload.CodeVerifier))
+	assert.Equal(t, base64.RawURLEncoding.EncodeToString(challenge[:]), query.Get("code_challenge"))
 }
 
 func TestGenerateOAuthCodeBindsFlowToAuthenticatedSession(t *testing.T) {

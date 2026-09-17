@@ -11,10 +11,12 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 )
@@ -28,6 +30,13 @@ func DistGetSiteInfo(c *gin.Context) {
 	if siteName == "" {
 		siteName = "API Route"
 	}
+	oauthProviders := make([]gin.H, 0, len(distOAuthProviders))
+	for _, id := range []string{"google", "github", "x"} {
+		provider := oauth.GetProvider(id)
+		if provider != nil && provider.IsEnabled() {
+			oauthProviders = append(oauthProviders, gin.H{"id": id, "name": provider.GetName()})
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -35,11 +44,13 @@ func DistGetSiteInfo(c *gin.Context) {
 			"name":                siteName,
 			"theme_template":      "claude",
 			"enable_topup":        true,
-			"enable_online_topup": true,
+			"enable_online_topup": isEpayTopUpEnabled(),
 			"enable_crypto_topup": cryptoCfg.EnableCrypto,
 			"enable_stripe_topup": stripeEnabled,
 			"enable_creem_topup":  false,
 			"allow_sub_dist":      false,
+			"oauth_origin":        strings.TrimRight(system_setting.ServerAddress, "/"),
+			"oauth_providers":     oauthProviders,
 			"currency": gin.H{
 				"code":              "CNY",
 				"symbol":            "¥",
@@ -136,11 +147,23 @@ func DistGetSubDistributorInfo(c *gin.Context) {
 func DistGetTopupInfo(c *gin.Context) {
 	cryptoCfg := operation_setting.GetCryptoSetting()
 	stripeEnabled := isStripeTopUpEnabled()
-	payMethods := []gin.H{
-		{
+	epayEnabled := isEpayTopUpEnabled()
+	payMethods := make([]gin.H, 0, len(operation_setting.PayMethods)+2)
+	if cryptoCfg.EnableCrypto {
+		payMethods = append(payMethods, gin.H{
 			"name": "加密货币充值 (Arbitrum One / TRC20)",
 			"type": "crypto",
-		},
+		})
+	}
+	if epayEnabled {
+		for _, method := range operation_setting.PayMethods {
+			payMethods = append(payMethods, gin.H{
+				"name":      method["name"],
+				"type":      method["type"],
+				"icon":      method["icon"],
+				"min_topup": method["min_topup"],
+			})
+		}
 	}
 	if stripeEnabled {
 		payMethods = append(payMethods, gin.H{
@@ -154,7 +177,7 @@ func DistGetTopupInfo(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"min_topup":             cryptoCfg.CryptoMinTopUp,
-			"enable_online_topup":   true,
+			"enable_online_topup":   epayEnabled,
 			"enable_crypto_topup":   cryptoCfg.EnableCrypto,
 			"enable_stripe_topup":   stripeEnabled,
 			"enable_creem_topup":    false,

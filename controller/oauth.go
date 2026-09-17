@@ -31,6 +31,7 @@ type oauthStateRequest struct {
 
 type oauthFlowPayload struct {
 	AffiliateCode   string                         `json:"affiliate_code,omitempty"`
+	CodeVerifier    string                         `json:"code_verifier,omitempty"`
 	Verification    *service.OAuthVerificationFlow `json:"verification,omitempty"`
 	Telegram        *oauth.TelegramOAuthFlow       `json:"telegram,omitempty"`
 	SessionIdentity *service.AuthIdentity          `json:"session_identity,omitempty"`
@@ -166,6 +167,14 @@ func HandleOAuth(c *gin.Context) {
 			"message": i18n.T(c, i18n.MsgOAuthStateInvalid),
 		})
 		return
+	}
+	var basePayload oauthFlowPayload
+	if err := common.UnmarshalJsonStr(pendingFlow.Payload, &basePayload); err != nil {
+		writeSecurityOperationError(c, model.ErrAuthFlowInvalid)
+		return
+	}
+	if basePayload.CodeVerifier != "" {
+		c.Set(oauth.OAuthCodeVerifierContextKey, basePayload.CodeVerifier)
 	}
 
 	consumeMatch := model.AuthFlowMatch{

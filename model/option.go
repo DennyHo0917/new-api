@@ -2,6 +2,7 @@ package model
 
 import (
 	"maps"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -210,6 +211,46 @@ func loadOptionsFromDatabase() {
 		}
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
+	applyEnvironmentOptionOverrides()
+}
+
+func applyEnvironmentOptionOverrides() {
+	if value := strings.TrimSpace(os.Getenv("SERVER_ADDRESS")); value != "" {
+		system_setting.ServerAddress = value
+	}
+	merchantID := strings.TrimSpace(os.Getenv("ZPAY_MERCHANT_ID"))
+	merchantKey := strings.TrimSpace(os.Getenv("ZPAY_MERCHANT_KEY"))
+	if merchantID != "" {
+		operation_setting.EpayId = merchantID
+	}
+	if merchantKey != "" {
+		operation_setting.EpayKey = merchantKey
+	}
+	if value := strings.TrimSpace(os.Getenv("ZPAY_GATEWAY_URL")); value != "" {
+		operation_setting.PayAddress = value
+	} else if merchantID != "" && merchantKey != "" {
+		operation_setting.PayAddress = "https://zpayz.cn"
+	}
+	if value := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")); value != "" {
+		setting.StripeApiSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")); value != "" {
+		setting.StripeWebhookSecret = value
+	}
+	if value := strings.TrimSpace(os.Getenv("STRIPE_PRICE_ID")); value != "" {
+		setting.StripePriceId = value
+	}
+	githubClientID := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID"))
+	githubClientSecret := strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET"))
+	if githubClientID != "" {
+		common.GitHubClientId = githubClientID
+	}
+	if githubClientSecret != "" {
+		common.GitHubClientSecret = githubClientSecret
+	}
+	if githubClientID != "" && githubClientSecret != "" {
+		common.GitHubOAuthEnabled = true
+	}
 }
 
 func SyncOptions(frequency int) {

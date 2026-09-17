@@ -179,9 +179,16 @@
   - [x] 提交前核心定向测试通过；全量 `controller` 测试仍有既有 Windows/SQLite 临时库清理阶段的 `database is locked` / 文件占用失败，未发现本次改动相关失败。
 - [ ] **5.2 VPS 生产环境构建与部署**
   - [x] 提交代码并由 GitHub Actions 自动构建部署至 VPS（提交 `686dce6df`，Deploy API Route #6 成功，耗时 3m56s）
+  - [ ] 通过部署密钥注入 Stripe、ZPay、GitHub、Google、X 配置，后端不得持久化或输出明文密钥
+    - [x] 完成环境变量覆盖、Compose 透传和 GitHub Actions 安全传递代码；敏感值不进入 OptionMap、数据库或仓库
+    - [ ] 写入仓库 Actions Secrets 并验证容器实际读取（当前 `gh` 未登录且本机访问 GitHub 设备登录 TLS 超时）
+  - [ ] 接通并回归 `/api/dist/oauth/{google,github,x}` 登录兼容接口与 Stripe/ZPay 支付回调
+    - [x] 完成分销站 OAuth start/callback、PKCE S256、10 分钟服务端 state、支付方式发现及定向回归测试
+    - [ ] 在部署环境完成三方真实回调与支付沙盒/小额实测；本机对 Stripe/ZPay 的 TLS 握手失败，未将网络失败误判为凭据失败
   - [ ] 更新 VPS 的 Nginx 配置，确保 `/api/dist/*` 正确转发到 Go 后端容器
   - [ ] 配置链上验证所需的 RPC 节点、API Key 与平台收款钱包地址
 - [ ] **5.3 前端生产切流割接**
-  - [ ] 为 VPS 绑定正式 API 域名（如 `api.api-route.com`）并配置 SSL 证书
-  - [ ] 修改 `api-route-deploy/vercel.json` 中的 `destination` 指向新的 VPS 域名
+  - [ ] 在不改变 `www.api-route.com` 与 `global.api-route.com` 的前提下，为新后端准备独立源站域名与 SSL（不得提前切流）
+  - [ ] 修改可编辑前端 `api-route-deploy-new/vercel.json` 的候选转发规则并验证回滚；生产前端未经用户明确指令不得修改
+  - [ ] 将 `apiroute.subrouter.ai` 配置为新后端的普通上游渠道，验证新后端用户、Key、计费与零垫资边界
   - [ ] 触发 Vercel 构建上线，观察生产流量与日志，完成整体业务平滑接管

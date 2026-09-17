@@ -31,6 +31,8 @@ const (
 	AuthStyleInHeader   = 2 // Send as Basic Auth header
 )
 
+const OAuthCodeVerifierContextKey = "oauth_code_verifier"
+
 // GenericOAuthProvider implements OAuth for custom/generic OAuth providers
 type GenericOAuthProvider struct {
 	config *model.CustomOAuthProvider
@@ -97,6 +99,9 @@ func (p *GenericOAuthProvider) ExchangeToken(ctx context.Context, code string, c
 	values.Set("grant_type", "authorization_code")
 	values.Set("code", code)
 	values.Set("redirect_uri", redirectUri)
+	if verifier := strings.TrimSpace(c.GetString(OAuthCodeVerifierContextKey)); verifier != "" {
+		values.Set("code_verifier", verifier)
+	}
 
 	// Determine auth style
 	authStyle := p.config.AuthStyle

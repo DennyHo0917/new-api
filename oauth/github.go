@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -54,6 +56,10 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		"client_id":     common.GitHubClientId,
 		"client_secret": common.GitHubClientSecret,
 		"code":          code,
+		"redirect_uri":  fmt.Sprintf("%s/oauth/github", system_setting.ServerAddress),
+	}
+	if verifier := strings.TrimSpace(c.GetString(OAuthCodeVerifierContextKey)); verifier != "" {
+		values["code_verifier"] = verifier
 	}
 	jsonData, err := json.Marshal(values)
 	if err != nil {

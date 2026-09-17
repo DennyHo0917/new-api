@@ -45,4 +45,4 @@ service/openaicompat/chat_responses_live_local_test.go
 go.work
 go.work.sum
 subrouter_customers_backup.json
-
+client-key*

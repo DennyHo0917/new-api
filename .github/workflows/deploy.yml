@@ -32,11 +32,45 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+          SERVER_ADDRESS: https://www.api-route.com
+          ZPAY_GATEWAY_URL: https://zpayz.cn
+          ZPAY_MERCHANT_ID: ${{ secrets.ZPAY_MERCHANT_ID }}
+          ZPAY_MERCHANT_KEY: ${{ secrets.ZPAY_MERCHANT_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_ID: ${{ secrets.STRIPE_PRICE_ID }}
+          GITHUB_CLIENT_ID: ${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.OAUTH_GOOGLE_CLIENT_SECRET }}
+          X_CLIENT_ID: ${{ secrets.OAUTH_X_CLIENT_ID }}
+          X_CLIENT_SECRET: ${{ secrets.OAUTH_X_CLIENT_SECRET }}
         run: |
-          ssh \
+          emit_env() {
+            name="$1"
+            value="$2"
+            encoded="$(printf '%s' "$value" | base64 -w 0)"
+            printf 'export %s="$(printf %%s %s | base64 -d)"\n' "$name" "$encoded"
+          }
+          {
+            emit_env SERVER_ADDRESS "$SERVER_ADDRESS"
+            emit_env ZPAY_GATEWAY_URL "$ZPAY_GATEWAY_URL"
+            emit_env ZPAY_MERCHANT_ID "$ZPAY_MERCHANT_ID"
+            emit_env ZPAY_MERCHANT_KEY "$ZPAY_MERCHANT_KEY"
+            emit_env STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
+            emit_env STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
+            emit_env STRIPE_PRICE_ID "$STRIPE_PRICE_ID"
+            emit_env GITHUB_CLIENT_ID "$GITHUB_CLIENT_ID"
+            emit_env GITHUB_CLIENT_SECRET "$GITHUB_CLIENT_SECRET"
+            emit_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
+            emit_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+            emit_env X_CLIENT_ID "$X_CLIENT_ID"
+            emit_env X_CLIENT_SECRET "$X_CLIENT_SECRET"
+            printf '%s\n' '/data/api-route/deploy.sh'
+          } | ssh \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -i ~/.ssh/id_ed25519 \
             -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "/data/api-route/deploy.sh"
+            "bash -s"

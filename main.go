@@ -369,6 +369,9 @@ func InitResources() error {
 	i18n.SetUserLangLoader(model.GetUserLanguage)
 
 	// Load custom OAuth providers from database
+	if err = oauth.PrepareEnvironmentProviders(); err != nil {
+		common.SysError("failed to prepare environment OAuth providers: " + err.Error())
+	}
 	err = oauth.LoadCustomProviders()
 	if err != nil {
 		common.SysError("failed to load custom OAuth providers: " + err.Error())

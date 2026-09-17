@@ -1,12 +1,16 @@
 package oauth
 
 import (
+	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 var (
@@ -118,6 +122,7 @@ func LoadCustomProviders() error {
 	// Register each custom provider
 	var conflict error
 	for _, config := range customProviders {
+		config = environmentProviderConfig(config)
 		provider := NewGenericOAuthProvider(config)
 		if err := RegisterCustom(config.Slug, provider); err != nil {
 			common.SysError(err.Error())
@@ -129,6 +134,82 @@ func LoadCustomProviders() error {
 
 	common.SysLog(fmt.Sprintf("Loaded %d custom OAuth providers", len(customProviders)))
 	return conflict
+}
+
+// PrepareEnvironmentProviders creates only the non-secret provider metadata
+// needed for stable user binding IDs. Credentials remain in environment
+// variables and are applied to the in-memory provider configuration.
+func PrepareEnvironmentProviders() error {
+	for _, config := range []*model.CustomOAuthProvider{
+		environmentProviderConfig(&model.CustomOAuthProvider{Slug: "google"}),
+		environmentProviderConfig(&model.CustomOAuthProvider{Slug: "x"}),
+	} {
+		if !config.Enabled {
+			continue
+		}
+		if _, err := model.GetCustomOAuthProviderBySlug(config.Slug); err == nil {
+			continue
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		persisted := *config
+		persisted.ClientSecret = ""
+		if err := model.CreateCustomOAuthProvider(&persisted); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func environmentProviderConfig(config *model.CustomOAuthProvider) *model.CustomOAuthProvider {
+	copy := *config
+	switch copy.Slug {
+	case "google":
+		clientID := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID"))
+		clientSecret := strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET"))
+		if clientID == "" || clientSecret == "" {
+			if copy.ClientSecret == "" {
+				copy.Enabled = false
+			}
+			return &copy
+		}
+		copy.Name = "Google"
+		copy.Enabled = true
+		copy.ClientId = clientID
+		copy.ClientSecret = clientSecret
+		copy.AuthorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+		copy.TokenEndpoint = "https://oauth2.googleapis.com/token"
+		copy.UserInfoEndpoint = "https://openidconnect.googleapis.com/v1/userinfo"
+		copy.Scopes = "openid email profile"
+		copy.UserIdField = "sub"
+		copy.UsernameField = "preferred_username"
+		copy.DisplayNameField = "name"
+		copy.EmailField = "email"
+		copy.AuthStyle = AuthStyleInParams
+	case "x":
+		clientID := strings.TrimSpace(os.Getenv("X_CLIENT_ID"))
+		clientSecret := strings.TrimSpace(os.Getenv("X_CLIENT_SECRET"))
+		if clientID == "" || clientSecret == "" {
+			if copy.ClientSecret == "" {
+				copy.Enabled = false
+			}
+			return &copy
+		}
+		copy.Name = "X"
+		copy.Enabled = true
+		copy.ClientId = clientID
+		copy.ClientSecret = clientSecret
+		copy.AuthorizationEndpoint = "https://x.com/i/oauth2/authorize"
+		copy.TokenEndpoint = "https://api.x.com/2/oauth2/token"
+		copy.UserInfoEndpoint = "https://api.x.com/2/users/me?user.fields=id,name,username"
+		copy.Scopes = "tweet.read users.read"
+		copy.UserIdField = "data.id"
+		copy.UsernameField = "data.username"
+		copy.DisplayNameField = "data.name"
+		copy.EmailField = "data.email"
+		copy.AuthStyle = AuthStyleInHeader
+	}
+	return &copy
 }
 
 // ReloadCustomProviders reloads all custom OAuth providers from the database
