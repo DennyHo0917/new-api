@@ -180,7 +180,7 @@
 - [ ] **5.2 VPS 生产环境构建与部署**
   - [x] 提交代码并由 GitHub Actions 自动构建部署至 VPS（提交 `686dce6df`，Deploy API Route #6 成功，耗时 3m56s）
   - [x] 通过部署密钥注入 Stripe、ZPay、GitHub、Google、X 配置，后端不得持久化或输出明文密钥（运行时文件注入与生产读取已验证）
-    - [x] 完成环境变量覆盖、Compose 透传、GitHub Actions 加密文件注入和容器 `/data/.env.runtime` 读取代码；敏感值不进入 OptionMap、数据库或仓库
+    - [x] 完成环境变量覆盖、Compose 透传、GitHub Actions 经 SSH 加密传输的临时编码文件注入和容器 `/data/.env.runtime` 读取代码；敏感值不进入 OptionMap、数据库或仓库
     - [x] 已从忽略文件安全写入 11 项仓库 Actions Secrets；密钥值未进入 diff、日志或提交
     - [x] OAuth 元数据启动逻辑通过 SQLite、MySQL 5.7.44、PostgreSQL 9.6.24 实库兼容与重复执行测试（CI run `35172661409` 的定向步骤成功）
     - [x] 推送部署后验证容器实际读取：Deploy run `35174371207` 成功；`/api/dist/site/info` 返回 `oauth_origin=https://www.api-route.com`，并发现 Google/GitHub/X 三个提供商
