@@ -183,7 +183,7 @@
     - [x] 完成环境变量覆盖、Compose 透传、GitHub Actions 加密文件注入和容器 `/data/.env.runtime` 读取代码；敏感值不进入 OptionMap、数据库或仓库
     - [x] 已从忽略文件安全写入 11 项仓库 Actions Secrets；密钥值未进入 diff、日志或提交
     - [x] OAuth 元数据启动逻辑通过 SQLite、MySQL 5.7.44、PostgreSQL 9.6.24 实库兼容与重复执行测试（CI run `35172661409` 的定向步骤成功）
-    - [ ] 推送部署后验证容器实际读取
+    - [x] 推送部署后验证容器实际读取：Deploy run `35174371207` 成功；`/api/dist/site/info` 返回 `oauth_origin=https://www.api-route.com`，并发现 Google/GitHub/X 三个提供商
   - [ ] 接通并回归 `/api/dist/oauth/{google,github,x}` 登录兼容接口与 Stripe/ZPay 支付回调
     - [x] 完成分销站 OAuth start/callback、PKCE S256、10 分钟服务端 state、支付方式发现及定向回归测试
     - [ ] 在部署环境完成三方真实回调与支付沙盒/小额实测；本机对 Stripe/ZPay 的 TLS 握手失败，未将网络失败误判为凭据失败
