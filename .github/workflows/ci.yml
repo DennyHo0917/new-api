@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [codex/oauth-payments]
   pull_request:
     types: [opened, synchronize, closed]
 
