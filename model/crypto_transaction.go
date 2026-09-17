@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -198,22 +197,7 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 			return fmt.Errorf("failed to record topup history: %w", err)
 		}
 
-		var user User
-		if err := lockForUpdate(tx).First(&user, order.UserId).Error; err != nil {
-			return fmt.Errorf("failed to lock user %d: %w", order.UserId, err)
-		}
-
-		result := tx.Model(&User{}).
-			Where("id = ? AND quota <= ?", order.UserId, int64(common.MaxWalletQuota)-quotaAmount).
-			Update("quota", gorm.Expr("quota + ?", quotaAmount))
-		if result.Error != nil {
-			return fmt.Errorf("failed to increment user quota: %w", result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return errors.New("user quota capacity exceeded or user disappeared")
-		}
-
-		return nil
+		return settlePaidTopUp(tx, &topUpRecord, int(quotaAmount), nil)
 	})
 }
 

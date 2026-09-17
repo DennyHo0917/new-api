@@ -294,19 +294,22 @@ func DistGetUserSelf(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"id":            user.Id,
-			"username":      user.Username,
-			"display_name":  user.DisplayName,
-			"email":         user.Email,
-			"role":          user.Role,
-			"status":        user.Status,
-			"group":         user.Group,
-			"quota":         user.Quota,
-			"used_quota":    user.UsedQuota,
-			"request_count": user.RequestCount,
-			"aff_code":      user.AffCode,
-			"aff_count":     user.AffCount,
-			"aff_quota":     user.AffQuota,
+			"id":                      user.Id,
+			"username":                user.Username,
+			"display_name":            user.DisplayName,
+			"email":                   user.Email,
+			"role":                    user.Role,
+			"status":                  user.Status,
+			"group":                   user.Group,
+			"quota":                   user.Quota,
+			"used_quota":              user.UsedQuota,
+			"request_count":           user.RequestCount,
+			"aff_code":                user.AffCode,
+			"aff_count":               user.AffCount,
+			"aff_quota":               user.AffQuota,
+			"aff_history_quota":       user.AffHistoryQuota,
+			"default_commission_rate": model.AffiliateCommissionRate(0),
+			"commission_rate":         model.AffiliateCommissionRate(user.AffCount),
 		},
 	})
 }
@@ -691,15 +694,7 @@ func DistGetAffCode(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"aff_code":          user.AffCode,
-			"aff_count":         user.AffCount,
-			"aff_quota":         user.AffQuota,
-			"aff_history_quota": user.AffHistoryQuota,
-		},
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": user.AffCode})
 }
 
 // DistAffTransfer handles POST /api/dist/aff_transfer
@@ -709,12 +704,29 @@ func DistAffTransfer(c *gin.Context) {
 
 // DistAffEarnings handles GET /api/dist/aff_earnings
 func DistAffEarnings(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	pageSize = min(pageSize, 100)
+	items, total, err := model.GetAffiliateEarnings(userId, &common.PageInfo{Page: page, PageSize: pageSize})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取返佣记录失败"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": gin.H{
-			"items": []any{},
-			"total": 0,
-		},
+		"data":    items,
+		"total":   total,
 	})
 }
 

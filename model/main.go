@@ -371,6 +371,7 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 		&CryptoTransaction{},
+		&AffiliateEarning{},
 		&Package{},
 		&UserPackageSubscription{},
 	)

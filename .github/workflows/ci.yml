@@ -86,6 +86,12 @@ jobs:
           TEST_POSTGRES_DSN: host=127.0.0.1 user=postgres password=test-password dbname=new_api_oauth_test port=5432 sslmode=disable TimeZone=UTC
         run: go test ./oauth -run TestPrepareEnvironmentProvidersDoesNotPersistSecrets -count=1
 
+      - name: Test affiliate migration on supported databases
+        env:
+          TEST_MYSQL_DSN: root:test-password@tcp(127.0.0.1:3306)/new_api_oauth_test?charset=utf8mb4&parseTime=True&loc=UTC
+          TEST_POSTGRES_DSN: host=127.0.0.1 user=postgres password=test-password dbname=new_api_oauth_test port=5432 sslmode=disable TimeZone=UTC
+        run: go test ./model -run TestAffiliateEarningMigration -count=1
+
       - name: Test root and relaykit modules
         run: make test
 
