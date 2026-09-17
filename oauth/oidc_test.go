@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -12,6 +13,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -54,27 +57,55 @@ func TestGenericOAuthExchangeSendsPKCEVerifier(t *testing.T) {
 }
 
 func TestPrepareEnvironmentProvidersDoesNotPersistSecrets(t *testing.T) {
-	previousDB := model.DB
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.CustomOAuthProvider{}))
-	model.DB = db
-	t.Cleanup(func() { model.DB = previousDB })
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client")
 	t.Setenv("GOOGLE_CLIENT_SECRET", "google-secret")
 	t.Setenv("X_CLIENT_ID", "x-client")
 	t.Setenv("X_CLIENT_SECRET", "x-secret")
 
-	require.NoError(t, PrepareEnvironmentProviders())
+	for _, test := range []struct {
+		name string
+		dsn  string
+		open func(string) gorm.Dialector
+	}{
+		{name: "sqlite", dsn: ":memory:", open: sqlite.Open},
+		{name: "mysql", dsn: os.Getenv("TEST_MYSQL_DSN"), open: mysql.Open},
+		{name: "postgres", dsn: os.Getenv("TEST_POSTGRES_DSN"), open: postgres.Open},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if test.dsn == "" {
+				t.Skip("test database DSN is not configured")
+			}
+			previousDB := model.DB
+			db, err := gorm.Open(test.open(test.dsn), &gorm.Config{})
+			require.NoError(t, err)
+			model.DB = db
+			t.Cleanup(func() {
+				_ = db.Migrator().DropTable(&model.CustomOAuthProvider{})
+				if sqlDB, err := db.DB(); err == nil {
+					_ = sqlDB.Close()
+				}
+				model.DB = previousDB
+			})
+			_ = db.Migrator().DropTable(&model.CustomOAuthProvider{})
+			require.NoError(t, db.AutoMigrate(&model.CustomOAuthProvider{}))
+			require.NoError(t, db.AutoMigrate(&model.CustomOAuthProvider{}))
 
-	google, err := model.GetCustomOAuthProviderBySlug("google")
-	require.NoError(t, err)
-	assert.Empty(t, google.ClientSecret)
-	assert.Equal(t, "google-client", google.ClientId)
-	xProvider, err := model.GetCustomOAuthProviderBySlug("x")
-	require.NoError(t, err)
-	assert.Empty(t, xProvider.ClientSecret)
-	assert.Equal(t, "x-client", xProvider.ClientId)
+			require.NoError(t, PrepareEnvironmentProviders())
+			require.NoError(t, PrepareEnvironmentProviders())
+
+			google, err := model.GetCustomOAuthProviderBySlug("google")
+			require.NoError(t, err)
+			assert.Empty(t, google.ClientSecret)
+			assert.Equal(t, "google-client", google.ClientId)
+			xProvider, err := model.GetCustomOAuthProviderBySlug("x")
+			require.NoError(t, err)
+			assert.Empty(t, xProvider.ClientSecret)
+			assert.Equal(t, "x-client", xProvider.ClientId)
+			var count int64
+			require.NoError(t, db.Model(&model.CustomOAuthProvider{}).Count(&count).Error)
+			assert.EqualValues(t, 2, count)
+		})
+	}
 }
 
 func TestEnvironmentManagedProviderDisablesWithoutRuntimeSecret(t *testing.T) {

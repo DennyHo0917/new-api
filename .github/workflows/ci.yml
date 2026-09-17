@@ -19,6 +19,32 @@ jobs:
     timeout-minutes: 15
     env:
       GOWORK: 'off'
+    services:
+      mysql:
+        image: mysql:5.7.44
+        env:
+          MYSQL_ROOT_PASSWORD: test-password
+          MYSQL_DATABASE: new_api_oauth_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ptest-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      postgres:
+        image: postgres:9.6.24
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: new_api_oauth_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d new_api_oauth_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - name: Checkout
@@ -53,6 +79,12 @@ jobs:
       - name: Build relaykit independently
         working-directory: relaykit
         run: go build ./...
+
+      - name: Test OAuth provider bootstrap on supported databases
+        env:
+          TEST_MYSQL_DSN: root:test-password@tcp(127.0.0.1:3306)/new_api_oauth_test?charset=utf8mb4&parseTime=True&loc=UTC
+          TEST_POSTGRES_DSN: host=127.0.0.1 user=postgres password=test-password dbname=new_api_oauth_test port=5432 sslmode=disable TimeZone=UTC
+        run: go test ./oauth -run TestPrepareEnvironmentProvidersDoesNotPersistSecrets -count=1
 
       - name: Test root and relaykit modules
         run: make test
