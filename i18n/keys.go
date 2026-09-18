@@ -211,14 +211,6 @@ const (
 	MsgGroupIdMissing     = "group.id_missing"
 )
 
-// Checkin related messages
-const (
-	MsgCheckinDisabled     = "checkin.disabled"
-	MsgCheckinAlreadyToday = "checkin.already_today"
-	MsgCheckinFailed       = "checkin.failed"
-	MsgCheckinQuotaFailed  = "checkin.quota_failed"
-)
-
 // Passkey related messages
 const (
 	MsgPasskeyCreateFailed            = "passkey.create_failed"

@@ -183,12 +183,6 @@ group.name_type_empty: "Group name and type cannot be empty"
 group.name_exists: "Group name already exists"
 group.id_missing: "Group ID is missing"
 
-# Checkin messages
-checkin.disabled: "Check-in feature is not enabled"
-checkin.already_today: "Already checked in today"
-checkin.failed: "Check-in failed, please try again later"
-checkin.quota_failed: "Check-in failed: quota update error"
-
 # Passkey messages
 passkey.create_failed: "Unable to create Passkey credential"
 passkey.login_abnormal: "Passkey login status is abnormal"
