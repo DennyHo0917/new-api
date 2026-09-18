@@ -18,9 +18,14 @@ type CryptoSetting struct {
 	TronGridApiKey      string                       `json:"trongrid_api_key"`
 }
 
+const (
+	CryptoPaymentWindowMinutes = 10
+	CryptoOrderExpiryMinutes   = 15
+)
+
 var cryptoSetting = CryptoSetting{
 	EnableCrypto:        true,
-	CryptoExpiryMinutes: 30,
+	CryptoExpiryMinutes: CryptoOrderExpiryMinutes,
 	CryptoMinTopUp:      5.0,
 	CryptoWallets: map[string]string{
 		"tron": "TV8FyJ72SmYr8zJVvhWKqFKEa1yDLgVBgv",

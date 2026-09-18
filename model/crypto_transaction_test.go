@@ -9,6 +9,13 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestCryptoTransactionIsExpired(t *testing.T) {
+	order := &CryptoTransaction{ExpiredAt: 1_000}
+	assert.False(t, order.IsExpired(999))
+	assert.True(t, order.IsExpired(1_000))
+	assert.False(t, (&CryptoTransaction{}).IsExpired(1_000))
+}
+
 func TestCryptoTransactionLifecycle(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&User{}, &CryptoTransaction{}, &TopUp{}))
 

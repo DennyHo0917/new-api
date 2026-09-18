@@ -260,7 +260,7 @@ func DistGetTopupInfo(c *gin.Context) {
 			"enable_crypto_topup":   cryptoCfg.EnableCrypto,
 			"enable_stripe_topup":   stripeEnabled,
 			"enable_creem_topup":    false,
-			"crypto_expiry_minutes": cryptoCfg.CryptoExpiryMinutes,
+			"crypto_expiry_minutes": operation_setting.CryptoOrderExpiryMinutes,
 			"stripe_min_topup":      setting.StripeMinTopUp,
 			"pay_methods":           payMethods,
 			"crypto_wallets": gin.H{

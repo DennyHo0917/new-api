@@ -38,6 +38,10 @@ type CryptoTransaction struct {
 	UpdatedAt      int64                   `json:"updated_at" gorm:"not null"`
 }
 
+func (txRecord *CryptoTransaction) IsExpired(now int64) bool {
+	return txRecord != nil && txRecord.ExpiredAt > 0 && now >= txRecord.ExpiredAt
+}
+
 var (
 	ErrCryptoOrderNotFound = errors.New("crypto transaction order not found")
 	ErrCryptoTxHashReused  = errors.New("transaction hash has already been used")

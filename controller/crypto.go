@@ -84,11 +84,9 @@ func CreateCryptoOrder(c *gin.Context) {
 	}
 
 	tradeNo := fmt.Sprintf("CRYPTO%s%d", common.GetRandomString(6), time.Now().Unix())
-	expiryDuration := time.Duration(cfg.CryptoExpiryMinutes) * time.Minute
-	if expiryDuration <= 0 {
-		expiryDuration = 30 * time.Minute
-	}
-	expiredAt := time.Now().Add(expiryDuration).Unix()
+	now := time.Now()
+	paymentExpiredAt := now.Add(operation_setting.CryptoPaymentWindowMinutes * time.Minute).Unix()
+	expiredAt := now.Add(operation_setting.CryptoOrderExpiryMinutes * time.Minute).Unix()
 
 	order := &model.CryptoTransaction{
 		TradeNo:        tradeNo,
@@ -110,12 +108,13 @@ func CreateCryptoOrder(c *gin.Context) {
 		"success": true,
 		"message": "success",
 		"data": gin.H{
-			"trade_no":   order.TradeNo,
-			"wallet":     order.WalletAddress,
-			"amount":     order.ExpectedAmount,
-			"chain":      order.Chain,
-			"token":      order.Token,
-			"expired_at": order.ExpiredAt,
+			"trade_no":           order.TradeNo,
+			"wallet":             order.WalletAddress,
+			"amount":             order.ExpectedAmount,
+			"chain":              order.Chain,
+			"token":              order.Token,
+			"payment_expired_at": paymentExpiredAt,
+			"expired_at":         order.ExpiredAt,
 		},
 	})
 }
@@ -208,7 +207,7 @@ func GetCryptoOrderStatus(c *gin.Context) {
 
 	// If pending/processing and expired, mark as expired
 	if (order.Status == model.CryptoStatusPending || order.Status == model.CryptoStatusProcessing) &&
-		order.ExpiredAt > 0 && time.Now().Unix() > order.ExpiredAt {
+		order.IsExpired(time.Now().Unix()) {
 		_ = model.ExpireCryptoTransaction(tradeNo, "订单超时未完成")
 		order.Status = model.CryptoStatusExpired
 		order.FailReason = "订单超时未完成"
@@ -218,16 +217,18 @@ func GetCryptoOrderStatus(c *gin.Context) {
 		"success": true,
 		"message": "success",
 		"data": gin.H{
-			"trade_no":      order.TradeNo,
-			"status":        order.Status,
-			"amount":        order.ExpectedAmount,
-			"actual_amount": order.ActualAmount,
-			"quota_amount":  order.QuotaAmount,
-			"chain":         order.Chain,
-			"token":         order.Token,
-			"tx_hash":       order.TxHash,
-			"fail_reason":   order.FailReason,
-			"wallet":        order.WalletAddress,
+			"trade_no":           order.TradeNo,
+			"status":             order.Status,
+			"amount":             order.ExpectedAmount,
+			"actual_amount":      order.ActualAmount,
+			"quota_amount":       order.QuotaAmount,
+			"chain":              order.Chain,
+			"token":              order.Token,
+			"tx_hash":            order.TxHash,
+			"fail_reason":        order.FailReason,
+			"wallet":             order.WalletAddress,
+			"payment_expired_at": order.ExpiredAt - int64((operation_setting.CryptoOrderExpiryMinutes-operation_setting.CryptoPaymentWindowMinutes)*60),
+			"expired_at":         order.ExpiredAt,
 		},
 	})
 }

@@ -408,6 +408,10 @@ func VerifyAndSettleCryptoTx(ctx context.Context, tradeNo string, txHash string)
 	if order.Status == model.CryptoStatusExpired {
 		return false, "order expired", 0, errors.New("order is expired")
 	}
+	if order.IsExpired(time.Now().Unix()) {
+		_ = model.ExpireCryptoTransaction(tradeNo, "订单超时未完成")
+		return false, "order expired", 0, errors.New("order is expired")
+	}
 
 	cleanTxHash := strings.TrimSpace(txHash)
 	if cleanTxHash == "" {
