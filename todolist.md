@@ -138,6 +138,7 @@
   - [x] `GET /api/dist/site/packages`：返回在售套餐包列表
   - [x] `GET /api/dist/topup/info`：返回支持的支付方式、加密货币钱包配置（Arb/Tron 钱包地址）、最小充值额度等
   - [x] `POST /api/dist/topup/amount`：根据汇率动态计算支付金额与到账额度
+  - [x] 法币支付改用 USD 基准的全币种官方日汇率，每 24 小时更新；失败时沿用最近成功值，冷启动使用原配置兜底（后端 `fb30bee20`）
 - [x] **3.3 用户体系接口兼容 (`/api/dist/user/*`)** *(已在 `controller/dist.go` 完成)*
   - [x] `POST /api/dist/user/register`：用户注册接口适配
   - [x] `POST /api/dist/user/login`：用户登录接口适配（包含双轨账号探测）
