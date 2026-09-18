@@ -106,11 +106,5 @@ func SetDistRouter(router *gin.Engine) {
 		authGroup.GET("/aff_earnings", controller.DistAffEarnings)
 		authGroup.GET("/aff_payouts", controller.DistAffPayouts)
 		authGroup.POST("/aff_withdraw", controller.DistAffWithdraw)
-		authGroup.POST("/kol_apply", controller.DistKolApply)
-		authGroup.GET("/kol_status", controller.DistKolStatus)
-
-		authGroup.GET("/invoice/info", controller.DistInvoiceInfo)
-		authGroup.GET("/invoice/history", controller.DistInvoiceHistory)
-		authGroup.POST("/invoice", controller.DistCreateInvoice)
 	}
 }

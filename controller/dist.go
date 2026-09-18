@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -63,34 +65,12 @@ func DistGetSiteInfo(c *gin.Context) {
 
 // DistGetSiteModels handles GET /api/dist/site/models
 func DistGetSiteModels(c *gin.Context) {
-	models := service.GetGroupsEnabledModels([]string{"default"})
-	if len(models) == 0 {
-		models = []string{
-			"gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
-			"gemini-1.5-pro", "gemini-1.5-flash", "deepseek-chat", "deepseek-coder",
-		}
-	}
-
-	type ModelItem struct {
-		Id          int    `json:"id"`
-		ModelName   string `json:"model_name"`
-		DisplayName string `json:"display_name"`
-		Enabled     bool   `json:"enabled"`
-	}
-
-	items := make([]ModelItem, 0, len(models))
-	for i, m := range models {
-		items = append(items, ModelItem{
-			Id:          i + 1,
-			ModelName:   m,
-			DisplayName: m,
-			Enabled:     true,
-		})
-	}
-
+	items := model.GetPricing()
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    items,
+		"success":     true,
+		"data":        items,
+		"vendors":     model.GetVendors(),
+		"group_ratio": ratio_setting.GetGroupRatioCopy(),
 	})
 }
 
@@ -100,8 +80,48 @@ func DistGetSitePricing(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success":     true,
 		"data":        pricing,
+		"vendors":     model.GetVendors(),
 		"group_ratio": ratio_setting.GetGroupRatioCopy(),
 	})
+}
+
+func distGroupNames() []string {
+	ratio := ratio_setting.GetGroupRatioCopy()
+	names := make([]string, 0, len(ratio))
+	for name := range ratio {
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func distGroupName(value string) string {
+	value = strings.TrimSpace(value)
+	if ratio_setting.ContainsGroupRatio(value) {
+		return value
+	}
+	index, err := strconv.Atoi(value)
+	if err != nil || index < 1 {
+		return ""
+	}
+	names := distGroupNames()
+	if index > len(names) {
+		return ""
+	}
+	return names[index-1]
+}
+
+func distGroupPayload(name string, id int) gin.H {
+	return gin.H{
+		"id":              id,
+		"group":           name,
+		"name":            name,
+		"vendor_category": "Model access",
+		"price_discount":  ratio_setting.GetGroupRatio(name),
+		"description":     "Models and prices configured by the administrator.",
+	}
 }
 
 // DistGetSitePackages handles GET /api/dist/site/packages
@@ -119,17 +139,76 @@ func DistGetSitePackages(c *gin.Context) {
 
 // DistGetSiteKeyGroups handles GET /api/dist/site/key-groups
 func DistGetSiteKeyGroups(c *gin.Context) {
+	pricing := model.GetPricing()
+	names := distGroupNames()
+	groups := make([]gin.H, 0, len(names))
+	for index, name := range names {
+		modelCount := 0
+		for _, item := range pricing {
+			if common.StringsContains(item.EnableGroup, "all") || common.StringsContains(item.EnableGroup, name) {
+				modelCount++
+			}
+		}
+		group := distGroupPayload(name, index+1)
+		group["model_count"] = modelCount
+		group["is_unavailable"] = modelCount == 0
+		groups = append(groups, group)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    []any{},
+		"data":    groups,
 	})
 }
 
 // DistGetSiteKeyGroupPricing handles GET /api/dist/site/key-groups/:id/pricing
 func DistGetSiteKeyGroupPricing(c *gin.Context) {
+	groupName := distGroupName(c.Param("id"))
+	if groupName == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "分组不存在"})
+		return
+	}
+	ratio := ratio_setting.GetGroupRatio(groupName)
+	items := make([]gin.H, 0)
+	for _, pricing := range model.GetPricing() {
+		if !common.StringsContains(pricing.EnableGroup, "all") && !common.StringsContains(pricing.EnableGroup, groupName) {
+			continue
+		}
+		category := "chat"
+		if len(pricing.SupportedEndpointTypes) > 0 {
+			category = string(pricing.SupportedEndpointTypes[0])
+		}
+		item := gin.H{
+			"model_name":   pricing.ModelName,
+			"display_name": pricing.ModelName,
+			"status":       "healthy",
+			"category":     category,
+			"route_count":  1,
+			"has_range":    false,
+		}
+		if pricing.QuotaType == 1 {
+			item["billing_type"] = "per_call"
+			item["fixed_price_min"] = pricing.ModelPrice * ratio
+			item["fixed_price_max"] = pricing.ModelPrice * ratio
+		} else if pricing.BillingMode == "tiered_expr" {
+			item["billing_type"] = "tiered_expr"
+			item["billing_expr"] = pricing.BillingExpr
+		} else {
+			base := pricing.ModelRatio * 2 * ratio / 1000
+			item["billing_type"] = "per_token"
+			item["input_price_min"] = base
+			item["input_price_max"] = base
+			item["output_price_min"] = base * pricing.CompletionRatio
+			item["output_price_max"] = base * pricing.CompletionRatio
+		}
+		items = append(items, item)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    []any{},
+		"data": gin.H{
+			"group":   distGroupPayload(groupName, 0),
+			"items":   items,
+			"summary": gin.H{"model_count": len(items)},
+		},
 	})
 }
 
@@ -363,6 +442,7 @@ func DistGetTokens(c *gin.Context) {
 		AccessedTime   int64  `json:"accessed_time"`
 		ExpiredTime    int64  `json:"expired_time"`
 		Models         string `json:"models"`
+		Group          string `json:"group"`
 	}
 
 	items := make([]DistTokenItem, 0, len(tokens))
@@ -378,6 +458,7 @@ func DistGetTokens(c *gin.Context) {
 			AccessedTime:   t.AccessedTime,
 			ExpiredTime:    t.ExpiredTime,
 			Models:         t.ModelLimits,
+			Group:          t.Group,
 		})
 	}
 
@@ -401,6 +482,7 @@ func DistCreateToken(c *gin.Context) {
 		ExpiredTime    int64  `json:"expired_time"`
 		UnlimitedQuota bool   `json:"unlimited_quota"`
 		Models         string `json:"models"`
+		Group          string `json:"group"`
 		Subnet         string `json:"subnet"`
 	}
 
@@ -425,6 +507,7 @@ func DistCreateToken(c *gin.Context) {
 		UnlimitedQuota:     req.UnlimitedQuota,
 		ModelLimits:        req.Models,
 		ModelLimitsEnabled: req.Models != "",
+		Group:              strings.TrimSpace(req.Group),
 		Status:             common.TokenStatusEnabled,
 	}
 
@@ -470,6 +553,7 @@ func DistUpdateToken(c *gin.Context) {
 		RemainQuota    *int64  `json:"remain_quota"`
 		UnlimitedQuota *bool   `json:"unlimited_quota"`
 		ExpiredTime    *int64  `json:"expired_time"`
+		Group          *string `json:"group"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -491,6 +575,9 @@ func DistUpdateToken(c *gin.Context) {
 	}
 	if req.ExpiredTime != nil {
 		token.ExpiredTime = *req.ExpiredTime
+	}
+	if req.Group != nil && strings.TrimSpace(*req.Group) != "" {
+		token.Group = strings.TrimSpace(*req.Group)
 	}
 
 	if err := token.Update(); err != nil {
@@ -521,9 +608,52 @@ func DistDeleteToken(c *gin.Context) {
 
 // DistGetTokenModels handles GET /api/dist/token/:id/models
 func DistGetTokenModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	tokenId, _ := strconv.Atoi(c.Param("id"))
+	if userId <= 0 || tokenId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+	token, err := model.GetTokenByIds(tokenId, userId)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "令牌不存在"})
+		return
+	}
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "用户不存在"})
+		return
+	}
+	group := strings.TrimSpace(token.Group)
+	if group == "" {
+		group = strings.TrimSpace(user.Group)
+	}
+	models := service.GetGroupsEnabledModels([]string{group})
+	if token.ModelLimitsEnabled && strings.TrimSpace(token.ModelLimits) != "" {
+		allowed := make(map[string]bool)
+		for item := range strings.SplitSeq(token.ModelLimits, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				allowed[item] = true
+			}
+		}
+		filtered := make([]string, 0, len(models))
+		for _, item := range models {
+			if allowed[item] {
+				filtered = append(filtered, item)
+			}
+		}
+		models = filtered
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    []string{},
+		"data": gin.H{
+			"models":                  models,
+			"count":                   len(models),
+			"restricted_by_models":    token.ModelLimitsEnabled,
+			"restricted_by_providers": false,
+			"provider_names":          []string{},
+			"group":                   group,
+		},
 	})
 }
 
@@ -653,35 +783,6 @@ func DistRedeemCode(c *gin.Context) {
 	TopUp(c)
 }
 
-// DistInvoiceInfo handles GET /api/dist/invoice/info
-func DistInvoiceInfo(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"enabled": false,
-		},
-	})
-}
-
-// DistInvoiceHistory handles GET /api/dist/invoice/history
-func DistInvoiceHistory(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"items": []any{},
-			"total": 0,
-		},
-	})
-}
-
-// DistCreateInvoice handles POST /api/dist/invoice
-func DistCreateInvoice(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": false,
-		"message": "发票系统维护中",
-	})
-}
-
 // DistGetAffCode handles GET /api/dist/aff
 func DistGetAffCode(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -732,37 +833,87 @@ func DistAffEarnings(c *gin.Context) {
 
 // DistAffPayouts handles GET /api/dist/aff_payouts
 func DistAffPayouts(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	pageSize = min(pageSize, 100)
+	items, total, err := model.GetAffiliatePayouts(userId, &common.PageInfo{Page: page, PageSize: pageSize})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取提现记录失败"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": []any{},
-			"total": 0,
+			"items": items,
+			"total": total,
 		},
 	})
 }
 
 // DistAffWithdraw handles POST /api/dist/aff_withdraw
 func DistAffWithdraw(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": false,
-		"message": "提现申请已关闭",
-	})
-}
-
-// DistKolApply handles POST /api/dist/kol_apply
-func DistKolApply(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+	var req struct {
+		Amount        float64 `json:"amount"`
+		PaymentMethod string  `json:"payment_method"`
+		Remark        string  `json:"remark"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "参数错误"})
+		return
+	}
+	if math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) || req.Amount <= 0 || math.IsNaN(common.QuotaPerUnit) || math.IsInf(common.QuotaPerUnit, 0) || common.QuotaPerUnit <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "提现金额无效"})
+		return
+	}
+	quota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromFloat(req.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil || quota <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "提现金额无效"})
+		return
+	}
+	payout, err := model.CreateAffiliatePayout(userId, quota, req.PaymentMethod, req.Remark)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrAffiliatePayoutInvalid):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "提现参数无效"})
+		case errors.Is(err, model.ErrAffiliatePayoutInsufficient):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "邀请额度不足"})
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "申请已提交",
-	})
-}
-
-// DistKolStatus handles GET /api/dist/kol_status
-func DistKolStatus(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
+		"message": "提现申请已提交",
 		"data": gin.H{
-			"status": "none",
+			"id":             payout.Id,
+			"quota":          payout.Quota,
+			"amount":         req.Amount,
+			"payment_method": payout.PaymentMethod,
+			"remark":         payout.Remark,
+			"status":         payout.Status,
+			"created_time":   payout.CreatedTime,
 		},
 	})
 }

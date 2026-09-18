@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -21,6 +22,35 @@ func GetGroups(c *gin.Context) {
 		"message": "",
 		"data":    groupNames,
 	})
+}
+
+func GetGroupRatios(c *gin.Context) {
+	common.ApiSuccess(c, ratio_setting.GetGroupRatioCopy())
+}
+
+func UpdateGroupRatios(c *gin.Context) {
+	var request struct {
+		Ratios map[string]float64 `json:"ratios"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || request.Ratios == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid group ratios"})
+		return
+	}
+	raw, err := common.Marshal(request.Ratios)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := ratio_setting.CheckGroupRatio(string(raw)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	if err := model.UpdateOption("GroupRatio", string(raw)); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "group.ratios.update", map[string]any{"groups": request.Ratios})
+	common.ApiSuccess(c, request.Ratios)
 }
 
 func GetUserGroups(c *gin.Context) {

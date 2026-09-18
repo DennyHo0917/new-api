@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -40,6 +41,125 @@ type AffiliateEarningItem struct {
 	CommissionRate  float64 `json:"commission_rate"`
 	CommissionQuota int64   `json:"commission_quota"`
 	CreatedTime     int64   `json:"created_time"`
+}
+
+const AffiliatePayoutStatusPending = "pending"
+
+var (
+	ErrAffiliatePayoutInvalid      = errors.New("invalid affiliate payout")
+	ErrAffiliatePayoutInsufficient = errors.New("affiliate quota insufficient")
+)
+
+// AffiliatePayout records a withdrawal request after its quota is atomically
+// reserved from the inviter wallet. The pending row is the handoff for the
+// administrator's external payment process.
+type AffiliatePayout struct {
+	Id            int    `json:"id" gorm:"primaryKey"`
+	UserId        int    `json:"user_id" gorm:"index;not null"`
+	Quota         int    `json:"quota" gorm:"type:bigint;not null;default:0"`
+	PaymentMethod string `json:"payment_method" gorm:"type:varchar(128);not null"`
+	Remark        string `json:"remark" gorm:"type:text"`
+	Status        string `json:"status" gorm:"type:varchar(20);not null;default:'pending';index"`
+	CreatedTime   int64  `json:"created_time" gorm:"index;not null;default:0"`
+	UpdatedTime   int64  `json:"updated_time" gorm:"not null;default:0"`
+	ProcessedTime int64  `json:"processed_time" gorm:"not null;default:0"`
+}
+
+type AffiliatePayoutItem struct {
+	Id            int     `json:"id"`
+	Quota         int     `json:"quota"`
+	Amount        float64 `json:"amount"`
+	PaymentMethod string  `json:"payment_method"`
+	Remark        string  `json:"remark"`
+	Status        string  `json:"status"`
+	CreatedTime   int64   `json:"created_time"`
+	UpdatedTime   int64   `json:"updated_time"`
+	ProcessedTime int64   `json:"processed_time"`
+}
+
+// CreateAffiliatePayout atomically reserves the requested affiliate quota and
+// creates a pending payout record. A row lock plus a guarded update prevents
+// concurrent requests from spending the same balance twice.
+func CreateAffiliatePayout(userID, quota int, paymentMethod, remark string) (*AffiliatePayout, error) {
+	paymentMethod = strings.TrimSpace(paymentMethod)
+	remark = strings.TrimSpace(remark)
+	if userID <= 0 || quota <= 0 || quota > common.MaxWalletQuota || paymentMethod == "" || len(paymentMethod) > 128 || len(remark) > 2000 {
+		return nil, ErrAffiliatePayoutInvalid
+	}
+
+	var payout AffiliatePayout
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := lockForUpdate(tx).Select("id", "aff_quota").First(&user, userID).Error; err != nil {
+			return err
+		}
+		if user.AffQuota < quota {
+			return ErrAffiliatePayoutInsufficient
+		}
+		result := tx.Model(&User{}).
+			Where("id = ? AND aff_quota >= ?", userID, quota).
+			Update("aff_quota", gorm.Expr("aff_quota - ?", quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAffiliatePayoutInsufficient
+		}
+
+		now := common.GetTimestamp()
+		payout = AffiliatePayout{
+			UserId:        userID,
+			Quota:         quota,
+			PaymentMethod: paymentMethod,
+			Remark:        remark,
+			Status:        AffiliatePayoutStatusPending,
+			CreatedTime:   now,
+			UpdatedTime:   now,
+		}
+		return tx.Create(&payout).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &payout, nil
+}
+
+func GetAffiliatePayouts(userID int, pageInfo *common.PageInfo) ([]AffiliatePayoutItem, int64, error) {
+	if userID <= 0 {
+		return nil, 0, ErrAffiliatePayoutInvalid
+	}
+	if pageInfo == nil {
+		pageInfo = &common.PageInfo{Page: 1, PageSize: 20}
+	}
+
+	query := DB.Model(&AffiliatePayout{}).Where("user_id = ?", userID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []AffiliatePayout
+	if err := query.Order("id DESC").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	items := make([]AffiliatePayoutItem, 0, len(rows))
+	for _, row := range rows {
+		amount := 0.0
+		if common.QuotaPerUnit > 0 {
+			amount = float64(row.Quota) / common.QuotaPerUnit
+		}
+		items = append(items, AffiliatePayoutItem{
+			Id:            row.Id,
+			Quota:         row.Quota,
+			Amount:        amount,
+			PaymentMethod: row.PaymentMethod,
+			Remark:        row.Remark,
+			Status:        row.Status,
+			CreatedTime:   row.CreatedTime,
+			UpdatedTime:   row.UpdatedTime,
+			ProcessedTime: row.ProcessedTime,
+		})
+	}
+	return items, total, nil
 }
 
 func AffiliateCommissionRateBps(inviteCount int) int {

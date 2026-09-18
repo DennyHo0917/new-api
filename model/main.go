@@ -372,6 +372,7 @@ func migrateDB() error {
 		&AuthzRole{},
 		&CryptoTransaction{},
 		&AffiliateEarning{},
+		&AffiliatePayout{},
 		&Package{},
 		&UserPackageSubscription{},
 	)

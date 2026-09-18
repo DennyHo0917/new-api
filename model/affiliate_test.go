@@ -107,7 +107,11 @@ func TestAffiliateEarningMigration(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = sqlDB.Close() })
 			const table = "affiliate_earnings_migration_test"
-			t.Cleanup(func() { _ = db.Migrator().DropTable(table) })
+			const payoutTable = "affiliate_payouts_migration_test"
+			t.Cleanup(func() {
+				_ = db.Migrator().DropTable(table)
+				_ = db.Migrator().DropTable(payoutTable)
+			})
 
 			require.NoError(t, db.Table(table).AutoMigrate(&affiliateEarningMigrationV1{}))
 			require.NoError(t, db.Table(table).Create(&affiliateEarningMigrationV1{
@@ -122,6 +126,18 @@ func TestAffiliateEarningMigration(t *testing.T) {
 			assert.Equal(t, "migration-existing-order", saved.TradeNo)
 			duplicate := affiliateEarningMigrationV1{InviterId: 21, InviteeId: 22, TradeNo: saved.TradeNo}
 			assert.Error(t, db.Table(table).Create(&duplicate).Error)
+
+			require.NoError(t, db.Table(payoutTable).AutoMigrate(&AffiliatePayout{}))
+			require.NoError(t, db.Table(payoutTable).AutoMigrate(&AffiliatePayout{}))
+			payout := AffiliatePayout{
+				UserId: 11, Quota: 25_000, PaymentMethod: "bank", Status: AffiliatePayoutStatusPending,
+				CreatedTime: 1, UpdatedTime: 1,
+			}
+			require.NoError(t, db.Table(payoutTable).Create(&payout).Error)
+			var savedPayout AffiliatePayout
+			require.NoError(t, db.Table(payoutTable).First(&savedPayout, payout.Id).Error)
+			assert.Equal(t, payout.PaymentMethod, savedPayout.PaymentMethod)
+			assert.Equal(t, payout.Quota, savedPayout.Quota)
 		})
 	}
 }
@@ -203,6 +219,65 @@ func TestPaidTopUpWithoutInviterHasNoAffiliateEarning(t *testing.T) {
 	var count int64
 	require.NoError(t, DB.Model(&AffiliateEarning{}).Count(&count).Error)
 	assert.Zero(t, count)
+}
+
+func TestCreateAffiliatePayoutReservesBalance(t *testing.T) {
+	truncateTables(t)
+	user := createAffiliateTestUser(t, "affiliate-payout-user", 0, 0)
+	user.AffQuota = 1_000_000
+	require.NoError(t, DB.Save(&user).Error)
+
+	payout, err := CreateAffiliatePayout(user.Id, 350_000, "alipay", "account-123")
+	require.NoError(t, err)
+	require.NotNil(t, payout)
+	assert.Equal(t, user.Id, payout.UserId)
+	assert.Equal(t, 350_000, payout.Quota)
+	assert.Equal(t, AffiliatePayoutStatusPending, payout.Status)
+
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, user.Id).Error)
+	assert.Equal(t, 650_000, reloaded.AffQuota)
+	items, total, err := GetAffiliatePayouts(user.Id, &common.PageInfo{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 350_000, items[0].Quota)
+	assert.Equal(t, "alipay", items[0].PaymentMethod)
+}
+
+func TestCreateAffiliatePayoutRejectsInsufficientBalanceAndSerializesConcurrentRequests(t *testing.T) {
+	truncateTables(t)
+	user := createAffiliateTestUser(t, "affiliate-payout-concurrent", 0, 0)
+	user.AffQuota = 500_000
+	require.NoError(t, DB.Save(&user).Error)
+
+	const callers = 2
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Go(func() {
+			_, err := CreateAffiliatePayout(user.Id, 400_000, "bank", "")
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		require.ErrorIs(t, err, ErrAffiliatePayoutInsufficient)
+	}
+	assert.Equal(t, 1, successes)
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, user.Id).Error)
+	assert.Equal(t, 100_000, reloaded.AffQuota)
+	var count int64
+	require.NoError(t, DB.Model(&AffiliatePayout{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
 }
 
 func TestInvitationCountDoesNotDependOnSignupBonus(t *testing.T) {

@@ -206,8 +206,6 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.PUT("/passkey/domains", controller.UpdatePasskeyDomains)
-			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
-			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)
 			optionRoute.POST("/model_pricing/convert", controller.PreviewModelPricingConversion)
 			optionRoute.POST("/model_pricing/preview", controller.PreviewModelPricing)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
@@ -219,6 +217,12 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/save", controller.SaveWaffoPancake)
 			optionRoute.POST("/waffo-pancake/subscription-product", controller.CreateWaffoPancakeSubscriptionProduct)
 			optionRoute.GET("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
+		}
+		modelPricingRoute := apiRouter.Group("/option")
+		modelPricingRoute.Use(middleware.AdminAuth())
+		{
+			modelPricingRoute.GET("/model_pricing", controller.GetModelPricingConfig)
+			modelPricingRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)
 		}
 
 		// Custom OAuth provider management (root only)
@@ -348,6 +352,8 @@ func SetApiRouter(router *gin.Engine) {
 		groupRoute.Use(middleware.AdminAuth())
 		{
 			groupRoute.GET("/", controller.GetGroups)
+			groupRoute.GET("/ratios", controller.GetGroupRatios)
+			groupRoute.PUT("/ratios", controller.UpdateGroupRatios)
 		}
 
 		prefillGroupRoute := apiRouter.Group("/prefill_group")
