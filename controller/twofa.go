@@ -218,6 +218,11 @@ func AdminDisable2FA(c *gin.Context) {
 		})
 		return
 	}
+	if !requireAdminUserSecurityProof(c, service.AdminUserSecurityContext{
+		UserID: targetUser.Id, Action: service.AdminUserSecurityActionDisableTwoFA,
+	}) {
+		return
+	}
 
 	// 禁用2FA
 	if err := model.DisableTwoFAWithAuthVersion(userId); err != nil {
@@ -235,11 +240,13 @@ func AdminDisable2FA(c *gin.Context) {
 		writeSecurityOperationError(c, err)
 		return
 	}
+	notificationFailed := service.NotifyAccountSecurityChange(targetUser.Email, "Two-factor authentication disabled by an administrator") != nil
 
-	recordManageAuditFor(c, userId, "user.2fa_disable", nil)
+	recordManageAuditFor(c, userId, "user.2fa_disable", map[string]any{"notification_failed": notificationFailed})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "用户2FA已被强制禁用",
+		"data":    gin.H{"notification_warning": notificationFailed},
 	})
 }

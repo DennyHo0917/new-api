@@ -33,6 +33,18 @@ func GetVerificationMethods(c *gin.Context) {
 	common.ApiSuccess(c, requirements)
 }
 
+func requireAdminUserSecurityProof(c *gin.Context, context service.AdminUserSecurityContext) bool {
+	payload, err := common.Marshal(context)
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return false
+	}
+	return middleware.RequireSecurityProof(c, service.VerificationOperation{
+		Scope:   service.VerificationScopeAdminUserSecurity,
+		Context: payload,
+	}) != nil
+}
+
 // writeSecurityOperationError only exposes known, fixed business messages.
 // Unexpected errors retain their cause for the existing server-side auth logger.
 func writeSecurityOperationError(c *gin.Context, err error) {

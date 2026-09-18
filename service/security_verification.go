@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,6 +35,13 @@ const (
 	VerificationScopePasswordSet         = "account.password.set"
 	VerificationScopePasswordChange      = "account.password.change"
 	VerificationScopeAccountDelete       = "account.delete"
+	VerificationScopeAdminUserSecurity   = "admin.user.security"
+
+	AdminUserSecurityActionDelete       = "delete"
+	AdminUserSecurityActionResetPasskey = "reset_passkey"
+	AdminUserSecurityActionDisableTwoFA = "disable_2fa"
+	AdminUserSecurityActionOAuthUnbind  = "oauth_unbind"
+	AdminUserSecurityActionBindingClear = "binding_clear"
 )
 
 var (
@@ -64,6 +72,13 @@ type AccountBindingContext struct {
 
 type AccountUnbindingContext struct {
 	ProviderID int `json:"provider_id"`
+}
+
+type AdminUserSecurityContext struct {
+	UserID      int    `json:"user_id"`
+	Action      string `json:"action"`
+	ProviderID  int    `json:"provider_id,omitempty"`
+	BindingType string `json:"binding_type,omitempty"`
 }
 
 // VerificationBinding contains no original operation parameters. It can safely
@@ -114,6 +129,30 @@ func BindVerificationOperation(operation VerificationOperation) (VerificationBin
 	case VerificationScopeAccountUnbind:
 		var context AccountUnbindingContext
 		if len(fields) != 1 || common.Unmarshal(fields["provider_id"], &context.ProviderID) != nil || context.ProviderID <= 0 {
+			return VerificationBinding{}, ErrVerificationContextInvalid
+		}
+		normalized = context
+	case VerificationScopeAdminUserSecurity:
+		var context AdminUserSecurityContext
+		if common.Unmarshal(operation.Context, &context) != nil || context.UserID <= 0 {
+			return VerificationBinding{}, ErrVerificationContextInvalid
+		}
+		context.Action = strings.TrimSpace(context.Action)
+		context.BindingType = strings.ToLower(strings.TrimSpace(context.BindingType))
+		switch context.Action {
+		case AdminUserSecurityActionDelete, AdminUserSecurityActionResetPasskey, AdminUserSecurityActionDisableTwoFA:
+			if len(fields) != 2 || context.ProviderID != 0 || context.BindingType != "" {
+				return VerificationBinding{}, ErrVerificationContextInvalid
+			}
+		case AdminUserSecurityActionOAuthUnbind:
+			if len(fields) != 3 || context.ProviderID <= 0 || context.BindingType != "" {
+				return VerificationBinding{}, ErrVerificationContextInvalid
+			}
+		case AdminUserSecurityActionBindingClear:
+			if len(fields) != 3 || context.ProviderID != 0 || !slices.Contains([]string{"email", "github", "discord", "oidc", "wechat", "telegram", "linuxdo"}, context.BindingType) {
+				return VerificationBinding{}, ErrVerificationContextInvalid
+			}
+		default:
 			return VerificationBinding{}, ErrVerificationContextInvalid
 		}
 		normalized = context
@@ -186,7 +225,11 @@ func securityVerificationPolicy(scope string, state model.UserVerificationState)
 	case VerificationScopePasskeyRegister, VerificationScopeTwoFASetup,
 		VerificationScopeAccessTokenGenerate, VerificationScopeAccessTokenRevoke,
 		VerificationScopeAccountBind, VerificationScopeAccountUnbind,
-		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete:
+		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete,
+		VerificationScopeAdminUserSecurity:
+		if scope == VerificationScopeAdminUserSecurity && state.Role < common.RoleAdminUser {
+			return nil, ErrVerificationForbidden
+		}
 		if scope == VerificationScopeAccountDelete && state.Role == common.RoleRootUser {
 			return nil, ErrVerificationForbidden
 		}

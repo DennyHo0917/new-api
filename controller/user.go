@@ -751,20 +751,32 @@ func AdminClearUserBinding(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
+	if !requireAdminUserSecurityProof(c, service.AdminUserSecurityContext{
+		UserID: user.Id, Action: service.AdminUserSecurityActionBindingClear, BindingType: bindingType,
+	}) {
+		return
+	}
 
 	if err := user.ClearBinding(bindingType); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if _, err := model.RevokeAllUserSessions(user.Id, "admin_binding_clear"); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	notificationFailed := service.NotifyAccountSecurityChange(user.Email, "Login account unlinked by an administrator") != nil
 
 	recordManageAuditFor(c, user.Id, "user.binding_clear", map[string]any{
-		"bindingType": bindingType,
-		"username":    user.Username,
+		"bindingType":         bindingType,
+		"username":            user.Username,
+		"notification_failed": notificationFailed,
 	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "success",
+		"data":    gin.H{"notification_warning": notificationFailed},
 	})
 }
 
@@ -935,18 +947,26 @@ func DeleteUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	if !requireAdminUserSecurityProof(c, service.AdminUserSecurityContext{
+		UserID: originUser.Id, Action: service.AdminUserSecurityActionDelete,
+	}) {
+		return
+	}
 	err = model.HardDeleteUserById(id)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	notificationFailed := service.NotifyAccountSecurityChange(originUser.Email, "Account deleted by an administrator") != nil
 	recordManageAuditFor(c, originUser.Id, "user.delete", map[string]any{
-		"username": originUser.Username,
-		"id":       originUser.Id,
+		"username":            originUser.Username,
+		"id":                  originUser.Id,
+		"notification_failed": notificationFailed,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data":    gin.H{"notification_warning": notificationFailed},
 	})
 	return
 }

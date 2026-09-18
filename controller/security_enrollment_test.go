@@ -561,6 +561,16 @@ func TestSecurityEnrollmentOperationContext(t *testing.T) {
 		{"revoke access token", "access_token.revoke", ``, nil},
 		{"access token target injection", "access_token.revoke", `{"user_id":42}`, service.ErrVerificationContextInvalid},
 		{"enrollment target injection", "passkey.register", `{"user_id":42}`, service.ErrVerificationContextInvalid},
+		{"admin delete user", "admin.user.security", `{"user_id":42,"action":"delete"}`, nil},
+		{"admin reset passkey", "admin.user.security", `{"user_id":42,"action":"reset_passkey"}`, nil},
+		{"admin disable two factor", "admin.user.security", `{"user_id":42,"action":"disable_2fa"}`, nil},
+		{"admin oauth unbind", "admin.user.security", `{"user_id":42,"action":"oauth_unbind","provider_id":7}`, nil},
+		{"admin binding clear", "admin.user.security", `{"user_id":42,"action":"binding_clear","binding_type":"github"}`, nil},
+		{"admin missing target", "admin.user.security", `{"action":"delete"}`, service.ErrVerificationContextInvalid},
+		{"admin unknown action", "admin.user.security", `{"user_id":42,"action":"reset_password"}`, service.ErrVerificationContextInvalid},
+		{"admin oauth missing provider", "admin.user.security", `{"user_id":42,"action":"oauth_unbind"}`, service.ErrVerificationContextInvalid},
+		{"admin binding invalid type", "admin.user.security", `{"user_id":42,"action":"binding_clear","binding_type":"password"}`, service.ErrVerificationContextInvalid},
+		{"admin target injection", "admin.user.security", `{"user_id":42,"action":"delete","provider_id":7}`, service.ErrVerificationContextInvalid},
 		{"unknown scope", "user.email.change", `{}`, service.ErrProofScope},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -576,6 +586,46 @@ func TestSecurityEnrollmentOperationContext(t *testing.T) {
 	secondBinding, err := service.BindVerificationOperation(reordered)
 	require.NoError(t, err)
 	assert.Equal(t, firstBinding, secondBinding)
+}
+
+func TestAdminUserSecurityVerificationRequiresAdministrator(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	_, err := service.GetVerificationRequirements(identity, service.VerificationScopeAdminUserSecurity)
+	assert.ErrorIs(t, err, service.ErrVerificationForbidden)
+
+	require.NoError(t, model.DB.Model(user).Update("role", common.RoleAdminUser).Error)
+	require.NoError(t, model.PublishUserAuthCache(user.Id))
+	requirements, err := service.GetVerificationRequirements(identity, service.VerificationScopeAdminUserSecurity)
+	require.NoError(t, err)
+	assert.Equal(t, service.VerificationScopeAdminUserSecurity, requirements.Scope)
+	assert.NotEmpty(t, requirements.Methods)
+}
+
+func TestAdminUserSecurityProofBindsTargetAndAction(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	require.NoError(t, model.DB.Model(user).Update("role", common.RoleAdminUser).Error)
+	require.NoError(t, model.PublishUserAuthCache(user.Id))
+	operation := service.VerificationOperation{
+		Scope:   service.VerificationScopeAdminUserSecurity,
+		Context: []byte(`{"user_id":42,"action":"delete"}`),
+	}
+	proof, err := service.VerifySecurityInput(identity, service.VerificationInput{
+		Method: "password", Scope: operation.Scope, Context: operation.Context, Password: "enrollment-password",
+	})
+	require.NoError(t, err)
+
+	_, err = service.ConsumeOperationProof(proof.ProofToken, identity, service.VerificationOperation{
+		Scope: operation.Scope, Context: []byte(`{"user_id":43,"action":"delete"}`),
+	})
+	assert.ErrorIs(t, err, service.ErrProofContext)
+	_, err = service.ConsumeOperationProof(proof.ProofToken, identity, service.VerificationOperation{
+		Scope: operation.Scope, Context: []byte(`{"user_id":42,"action":"disable_2fa"}`),
+	})
+	assert.ErrorIs(t, err, service.ErrProofContext)
+	_, err = service.ConsumeOperationProof(proof.ProofToken, identity, operation)
+	require.NoError(t, err)
+	_, err = service.ConsumeOperationProof(proof.ProofToken, identity, operation)
+	assert.ErrorIs(t, err, service.ErrProofConsumed)
 }
 
 func TestSecurityEnrollmentChannelProofRejectsMismatchesBeforeConsumption(t *testing.T) {

@@ -457,6 +457,11 @@ func AdminResetPasskey(c *gin.Context) {
 		common.ApiErrorMsg(c, "no permission")
 		return
 	}
+	if !requireAdminUserSecurityProof(c, service.AdminUserSecurityContext{
+		UserID: user.Id, Action: service.AdminUserSecurityActionResetPasskey,
+	}) {
+		return
+	}
 
 	if _, err := model.GetPasskeyByUserID(user.Id); err != nil {
 		if errors.Is(err, model.ErrPasskeyNotFound) {
@@ -478,14 +483,17 @@ func AdminResetPasskey(c *gin.Context) {
 		writeSecurityOperationError(c, err)
 		return
 	}
+	notificationFailed := service.NotifyAccountSecurityChange(user.Email, "Passkey reset by an administrator") != nil
 
 	recordManageAuditFor(c, user.Id, "user.reset_passkey", map[string]any{
-		"username": user.Username,
-		"id":       user.Id,
+		"username":            user.Username,
+		"id":                  user.Id,
+		"notification_failed": notificationFailed,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Passkey 已重置",
+		"data":    gin.H{"notification_warning": notificationFailed},
 	})
 }
 

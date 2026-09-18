@@ -593,14 +593,30 @@ func UnbindCustomOAuthByAdmin(c *gin.Context) {
 		common.ApiErrorMsg(c, "invalid provider id")
 		return
 	}
+	if !requireAdminUserSecurityProof(c, service.AdminUserSecurityContext{
+		UserID: targetUser.Id, Action: service.AdminUserSecurityActionOAuthUnbind, ProviderID: providerId,
+	}) {
+		return
+	}
 
 	if err := model.DeleteUserOAuthBinding(userId, providerId); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if _, err := model.RevokeAllUserSessions(targetUser.Id, "admin_oauth_binding_unbind"); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	notificationFailed := service.NotifyAccountSecurityChange(targetUser.Email, "OAuth account unlinked by an administrator") != nil
+	recordManageAuditFor(c, targetUser.Id, "user.oauth_binding_unbind", map[string]any{
+		"provider_id":         providerId,
+		"username":            targetUser.Username,
+		"notification_failed": notificationFailed,
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "success",
+		"data":    gin.H{"notification_warning": notificationFailed},
 	})
 }
