@@ -79,6 +79,9 @@ func newSMTPClient(addr string) (*smtp.Client, error) {
 }
 
 func SendEmail(subject string, receiver string, content string) error {
+	if resendKey := strings.TrimSpace(os.Getenv("RESEND_API_KEY")); resendKey != "" {
+		return sendEmailViaResend(resendKey, subject, receiver, content)
+	}
 	if handled, err := sendEmailViaRelay(subject, receiver, content); handled {
 		return err
 	}
@@ -139,6 +142,38 @@ func SendEmail(subject string, receiver string, content string) error {
 		SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
 	}
 	return err
+}
+
+func sendEmailViaResend(apiKey string, subject string, receiver string, content string) error {
+	apiURL := strings.TrimSpace(os.Getenv("RESEND_API_URL"))
+	if apiURL == "" {
+		apiURL = "https://api.resend.com/emails"
+	}
+	from := strings.TrimSpace(os.Getenv("RESEND_FROM"))
+	if from == "" {
+		from = "API Route <support@api-route.com>"
+	}
+	payload, err := Marshal(map[string]any{
+		"from": from, "to": []string{receiver}, "subject": subject, "html": content,
+	})
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("Resend returned HTTP %d", response.StatusCode)
+	}
+	return nil
 }
 
 func sendEmailViaRelay(subject string, receiver string, content string) (bool, error) {

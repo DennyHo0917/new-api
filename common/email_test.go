@@ -308,11 +308,36 @@ func TestSendEmailUsesConfiguredHTTPRelay(t *testing.T) {
 	t.Cleanup(relay.Close)
 	t.Setenv("EMAIL_RELAY_URL", relay.URL)
 	t.Setenv("EMAIL_RELAY_SECRET", "relay-secret")
+	t.Setenv("RESEND_API_KEY", "")
 
 	require.NoError(t, SendEmail("Verification", "receiver@example.com", "<p>123456</p>"))
 	require.Equal(t, map[string]string{
 		"to": "receiver@example.com", "subject": "Verification", "html": "<p>123456</p>",
 	}, payload)
+}
+
+func TestSendEmailUsesConfiguredResendAPI(t *testing.T) {
+	var payload struct {
+		From    string   `json:"from"`
+		To      []string `json:"to"`
+		Subject string   `json:"subject"`
+		HTML    string   `json:"html"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "Bearer resend-secret", request.Header.Get("Authorization"))
+		require.NoError(t, DecodeJson(request.Body, &payload))
+		response.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("RESEND_API_KEY", "resend-secret")
+	t.Setenv("RESEND_API_URL", server.URL)
+
+	require.NoError(t, SendEmail("Verification", "receiver@example.com", "<p>123456</p>"))
+	require.Equal(t, "API Route <support@api-route.com>", payload.From)
+	require.Equal(t, []string{"receiver@example.com"}, payload.To)
+	require.Equal(t, "Verification", payload.Subject)
+	require.Equal(t, "<p>123456</p>", payload.HTML)
 }
 
 func TestSendEmailExplicitStartTLSRequiresServerSupport(t *testing.T) {
