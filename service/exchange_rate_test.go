@@ -10,18 +10,18 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetUSDExchangeRate(t *testing.T) {
+func TestGetUSDCNYExchangeRate(t *testing.T) {
 	originalURL := exchangeRateURL
 	originalClient := exchangeRateClient
 	exchangeRateCache.Lock()
-	originalRates := exchangeRateCache.rates
+	originalRate := exchangeRateCache.rate
 	originalUpdatedAt := exchangeRateCache.updatedAt
 	exchangeRateCache.Unlock()
 	t.Cleanup(func() {
 		exchangeRateURL = originalURL
 		exchangeRateClient = originalClient
 		exchangeRateCache.Lock()
-		exchangeRateCache.rates = originalRates
+		exchangeRateCache.rate = originalRate
 		exchangeRateCache.updatedAt = originalUpdatedAt
 		exchangeRateCache.Unlock()
 	})
@@ -29,27 +29,22 @@ func TestGetUSDExchangeRate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[
-			{"date":"2026-09-18","base":"USD","quote":"CNY","rate":7.12},
-			{"date":"2026-09-18","base":"USD","quote":"EUR","rate":0.84},
-			{"date":"2026-09-18","base":"USD","quote":"BAD","rate":-1}
+			{"date":"2026-09-18","base":"USD","quote":"CNY","rate":7.12}
 		]`))
 	}))
 	defer server.Close()
 	exchangeRateURL = server.URL
 	exchangeRateClient = server.Client()
 	exchangeRateCache.Lock()
-	exchangeRateCache.rates = map[string]float64{"USD": 1}
+	exchangeRateCache.rate = 0
 	exchangeRateCache.updatedAt = time.Time{}
 	exchangeRateCache.Unlock()
 
-	assert.Equal(t, 7.12, GetUSDExchangeRate(context.Background(), "cny", 7.3))
-	assert.Equal(t, 0.84, GetUSDExchangeRate(context.Background(), "EUR", 1))
-	assert.Equal(t, 1.0, GetUSDExchangeRate(context.Background(), "USD", 9))
-	assert.Equal(t, 2.0, GetUSDExchangeRate(context.Background(), "XXX", 2))
+	assert.Equal(t, 7.12, GetUSDCNYExchangeRate(context.Background(), 7.3))
 
 	server.Close()
 	exchangeRateCache.Lock()
 	exchangeRateCache.updatedAt = time.Time{}
 	exchangeRateCache.Unlock()
-	assert.Equal(t, 7.12, GetUSDExchangeRate(context.Background(), "CNY", 7.3))
+	assert.Equal(t, 7.12, GetUSDCNYExchangeRate(context.Background(), 7.3))
 }

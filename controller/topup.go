@@ -288,7 +288,7 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	usdExchangeRate := service.GetUSDExchangeRate(c.Request.Context(), "CNY", operation_setting.Price)
+	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
 	payMoney := getPayMoney(req.Amount, group, usdExchangeRate)
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
@@ -505,7 +505,7 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	usdExchangeRate := service.GetUSDExchangeRate(c.Request.Context(), "CNY", operation_setting.Price)
+	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
 	payMoney := getPayMoney(req.Amount, group, usdExchangeRate)
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})

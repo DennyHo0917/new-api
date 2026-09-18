@@ -16,13 +16,13 @@ import (
 const exchangeRateRefreshInterval = 24 * time.Hour
 
 var (
-	exchangeRateURL    = "https://api.frankfurter.dev/v2/rates?base=USD"
+	exchangeRateURL    = "https://api.frankfurter.dev/v2/rates?base=USD&quotes=CNY"
 	exchangeRateClient = &http.Client{Timeout: 10 * time.Second}
 	exchangeRateCache  = struct {
 		sync.RWMutex
-		rates     map[string]float64
+		rate      float64
 		updatedAt time.Time
-	}{rates: map[string]float64{"USD": 1}}
+	}{}
 	exchangeRateRefreshMu sync.Mutex
 )
 
@@ -31,19 +31,14 @@ type exchangeRateRow struct {
 	Rate  float64 `json:"rate"`
 }
 
-// GetUSDExchangeRate returns the number of settlement currency units per USD.
+// GetUSDCNYExchangeRate returns the number of CNY per USD.
 // The configured fallback keeps checkout available during a cold-start provider outage.
-func GetUSDExchangeRate(ctx context.Context, currency string, fallback float64) float64 {
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency == "USD" {
-		return 1
-	}
-
+func GetUSDCNYExchangeRate(ctx context.Context, fallback float64) float64 {
 	exchangeRateCache.RLock()
-	rate, ok := exchangeRateCache.rates[currency]
+	rate := exchangeRateCache.rate
 	stale := time.Since(exchangeRateCache.updatedAt) >= exchangeRateRefreshInterval
 	exchangeRateCache.RUnlock()
-	if ok && !stale {
+	if rate > 0 && !stale {
 		return rate
 	}
 
@@ -51,9 +46,9 @@ func GetUSDExchangeRate(ctx context.Context, currency string, fallback float64) 
 		common.SysError(fmt.Sprintf("refresh exchange rates failed: %v", err))
 	}
 	exchangeRateCache.RLock()
-	rate, ok = exchangeRateCache.rates[currency]
+	rate = exchangeRateCache.rate
 	exchangeRateCache.RUnlock()
-	if ok {
+	if rate > 0 {
 		return rate
 	}
 	if fallback > 0 && !math.IsNaN(fallback) && !math.IsInf(fallback, 0) {
@@ -90,21 +85,19 @@ func refreshExchangeRates(ctx context.Context) error {
 	if err := common.DecodeJson(resp.Body, &rows); err != nil {
 		return err
 	}
-	rates := make(map[string]float64, len(rows)+1)
-	rates["USD"] = 1
+	rate := 0.0
 	for _, row := range rows {
-		currency := strings.ToUpper(strings.TrimSpace(row.Quote))
-		if len(currency) != 3 || row.Rate <= 0 || math.IsNaN(row.Rate) || math.IsInf(row.Rate, 0) {
-			continue
+		if strings.EqualFold(strings.TrimSpace(row.Quote), "CNY") && row.Rate > 0 && !math.IsNaN(row.Rate) && !math.IsInf(row.Rate, 0) {
+			rate = row.Rate
+			break
 		}
-		rates[currency] = row.Rate
 	}
-	if len(rates) == 1 {
-		return errors.New("provider returned no valid rates")
+	if rate == 0 {
+		return errors.New("provider returned no valid USD/CNY rate")
 	}
 
 	exchangeRateCache.Lock()
-	exchangeRateCache.rates = rates
+	exchangeRateCache.rate = rate
 	exchangeRateCache.updatedAt = time.Now()
 	exchangeRateCache.Unlock()
 	return nil

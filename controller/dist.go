@@ -27,7 +27,7 @@ import (
 func DistGetSiteInfo(c *gin.Context) {
 	cryptoCfg := operation_setting.GetCryptoSetting()
 	stripeEnabled := isStripeTopUpEnabled()
-	usdExchangeRate := service.GetUSDExchangeRate(c.Request.Context(), "CNY", operation_setting.Price)
+	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
 
 	siteName := common.SystemName
 	if siteName == "" {

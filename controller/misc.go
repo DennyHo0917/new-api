@@ -45,7 +45,7 @@ func GetStatus(c *gin.Context) {
 
 	cs := console_setting.GetConsoleSetting()
 	passkeySetting := system_setting.PasskeySettingsSnapshot()
-	usdExchangeRate := service.GetUSDExchangeRate(c.Request.Context(), "CNY", operation_setting.Price)
+	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
