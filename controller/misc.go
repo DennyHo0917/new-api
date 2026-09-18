@@ -45,6 +45,7 @@ func GetStatus(c *gin.Context) {
 
 	cs := console_setting.GetConsoleSetting()
 	passkeySetting := system_setting.PasskeySettingsSnapshot()
+	usdExchangeRate := service.GetUSDExchangeRate(c.Request.Context(), "CNY", operation_setting.Price)
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
@@ -97,8 +98,8 @@ func GetStatus(c *gin.Context) {
 
 		"password_login_encryption_enabled": common.PasswordLoginEncryptionEnabled,
 
-		"usd_exchange_rate": operation_setting.USDExchangeRate,
-		"price":             operation_setting.Price,
+		"usd_exchange_rate": usdExchangeRate,
+		"price":             usdExchangeRate,
 		"stripe_unit_price": setting.StripeUnitPrice,
 
 		// 面板启用开关
