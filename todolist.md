@@ -181,6 +181,8 @@
   - [x] 捕获 SubRouter 返回的 `429 Insufficient Quota` 及额度不足错误
   - [x] 格式化向前端输出友好提示，引导用户前往 `https://www.api-route.com/topup` 充值
 - [x] **4.3 用户首次登录自迁移（密码与历史 Key 抓取）** *(已在 `service/dist_migration.go` + `controller/dist.go` 完成并通过测试)*
+  - [x] 收紧回源认证：仅允许 `Setting.subrouter_id` 已标记、账户启用且本地密码为空的旧站账户回源；密码与历史 Key 在同一事务中迁移，完成后永久禁止再次回源覆盖；SQLite 回归已覆盖未标记、已迁移、重复迁移、Session Cookie 携带与 Key 抓取失败回滚。
+  - [ ] 本机没有 MySQL 5.7.8+ / PostgreSQL 9.6+ 实例，以上事务路径尚未完成两种数据库的实库回归，不能据此宣称三数据库兼容验证完成。
   - [x] 用户登录时若本地未录入密码，先代理向上游 SubRouter 验证凭据
   - [x] 验证成功自动将密码加密存入本地库（严格设置初始 Quota = 0，恪守零垫资原则）
   - [x] 利用已认证 Session 自动抓取导入该用户的历史 API Key 列表，并打标 `Group = "subrouter"`

@@ -14,10 +14,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 var (
-	ErrSubRouterAuthFailed = errors.New("subrouter authentication failed")
+	ErrSubRouterAuthFailed           = errors.New("subrouter authentication failed")
+	ErrSubRouterMigrationNotEligible = errors.New("subrouter password migration is not eligible")
+	ErrSubRouterTokenSyncFailed      = errors.New("subrouter token sync failed")
 )
 
 type subRouterLoginResponse struct {
@@ -43,10 +46,24 @@ type subRouterTokenListResponse struct {
 	Data    []subRouterTokenItem `json:"data"`
 }
 
-// AuthenticateAndMigrateSubRouterUser verifies user credentials with upstream SubRouter.
-// If valid, creates/updates the local user with zero initial quota (zero-capital principle)
-// and pulls historical API keys into the local database tagged with Group="subrouter".
+// AuthenticateAndMigrateSubRouterUser verifies a pre-synchronized legacy user
+// with upstream SubRouter exactly once, then stores the local password and keys.
 func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User, error) {
+	var localUser model.User
+	if err := model.DB.Where("username = ? OR email = ?", username, model.NormalizeEmail(username)).First(&localUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSubRouterMigrationNotEligible
+		}
+		return nil, fmt.Errorf("load local migration user: %w", err)
+	}
+
+	var migrationMarker struct {
+		SubRouterID int `json:"subrouter_id"`
+	}
+	if localUser.Status != common.UserStatusEnabled || localUser.Password != "" || common.UnmarshalJsonStr(localUser.Setting, &migrationMarker) != nil || migrationMarker.SubRouterID <= 0 {
+		return nil, ErrSubRouterMigrationNotEligible
+	}
+
 	baseURL := GetSubRouterBaseURL()
 
 	jar, err := cookiejar.New(nil)
@@ -137,54 +154,15 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		}
 	}
 
-	// 2. Synchronize local User
-	var localUser model.User
-	query := model.DB.Where("username = ?", username)
-	if email != "" {
-		query = model.DB.Where("username = ? OR email = ?", username, email)
-	}
-
-	userExists := query.First(&localUser).Error == nil
-
-	if !userExists {
-		localUser = model.User{
-			Username:    username,
-			Password:    password,
-			DisplayName: displayName,
-			Email:       email,
-			Role:        common.RoleCommonUser,
-			Status:      common.UserStatusEnabled,
-		}
-		if insertErr := localUser.Insert(0); insertErr != nil {
-			return nil, fmt.Errorf("failed to create local migrated user: %w", insertErr)
-		}
-		// Strict zero-capital principle: zero out quota regardless of new-user bonus
-		if localUser.Quota != 0 {
-			localUser.Quota = 0
-			_ = model.DB.Model(&localUser).Update("quota", 0).Error
-		}
-		common.SysLog(fmt.Sprintf("[Migration] Created new local user %s (ID: %d) from SubRouter with quota 0", username, localUser.Id))
-	} else {
-		hashedPwd, pwdErr := common.Password2Hash(password)
-		if pwdErr == nil {
-			localUser.Password = hashedPwd
-		}
-		if email != "" && localUser.Email == "" {
-			localUser.Email = email
-		}
-		if displayName != "" && localUser.DisplayName == "" {
-			localUser.DisplayName = displayName
-		}
-		_ = model.DB.Save(&localUser).Error
-		common.SysLog(fmt.Sprintf("[Migration] Updated password and credentials for existing user %s (ID: %d)", username, localUser.Id))
-	}
-
-	// 3. Fetch historical API keys from SubRouter using authenticated session
+	// 2. Fetch historical API keys before completing password migration. If this
+	// fails, the account remains eligible for a later retry instead of losing keys.
 	tokenEndpoints := []string{
 		baseURL + "/api/dist/token/list",
 		baseURL + "/api/token/list",
 	}
 
+	var historicalTokens []subRouterTokenItem
+	tokenListFetched := false
 	for _, tokenEndpoint := range tokenEndpoints {
 		tokenReq, err := http.NewRequest(http.MethodGet, tokenEndpoint, nil)
 		if err != nil {
@@ -203,49 +181,104 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		}
 
 		var parsedTokens subRouterTokenListResponse
-		if err := common.Unmarshal(tokenBytes, &parsedTokens); err == nil && parsedTokens.Success && len(parsedTokens.Data) > 0 {
-			for _, t := range parsedTokens.Data {
-				cleanKey := strings.TrimPrefix(t.Key, "sk-")
-				if cleanKey == "" {
-					continue
-				}
-
-				// Check if token already exists locally
-				existingToken, _ := model.GetTokenByKey(cleanKey, true)
-				if existingToken == nil {
-					name := t.Name
-					if name == "" {
-						name = "Default API Key"
-					}
-					createdTime := t.CreatedTime
-					if createdTime <= 0 {
-						createdTime = common.GetTimestamp()
-					}
-					expiredTime := t.ExpiredTime
-					if expiredTime == 0 {
-						expiredTime = -1
-					}
-
-					migratedToken := model.Token{
-						UserId:         localUser.Id,
-						Name:           name,
-						Key:            cleanKey,
-						Status:         common.TokenStatusEnabled,
-						RemainQuota:    0,
-						UnlimitedQuota: true,
-						CreatedTime:    createdTime,
-						AccessedTime:   common.GetTimestamp(),
-						ExpiredTime:    expiredTime,
-						Group:          model.LegacySubRouterGroup, // Tagged as legacy SubRouter key
-					}
-					if err := model.DB.Create(&migratedToken).Error; err == nil {
-						common.SysLog(fmt.Sprintf("[Migration] Imported token %s (%s) for user %d", name, cleanKey[:min(8, len(cleanKey))]+"...", localUser.Id))
-					}
-				}
-			}
-			break // Successfully imported from first working token endpoint
+		if err := common.Unmarshal(tokenBytes, &parsedTokens); err == nil && parsedTokens.Success {
+			historicalTokens = parsedTokens.Data
+			tokenListFetched = true
+			break
 		}
 	}
+	if !tokenListFetched {
+		return nil, ErrSubRouterTokenSyncFailed
+	}
+
+	// 3. Atomically claim the one-time migration and import the keys. The
+	// conditional password update prevents concurrent requests from overwriting it.
+	hashedPassword, err := common.Password2Hash(password)
+	if err != nil {
+		return nil, err
+	}
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"password": hashedPassword}
+		if email != "" && localUser.Email == "" {
+			updates["email"] = model.NormalizeEmail(email)
+		}
+		if displayName != "" && localUser.DisplayName == "" {
+			updates["display_name"] = displayName
+		}
+		result := tx.Model(&model.User{}).Where("id = ? AND password = ?", localUser.Id, "").Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrSubRouterMigrationNotEligible
+		}
+		if _, err := model.IncrementUserAuthVersionWithTx(tx, localUser.Id); err != nil {
+			return err
+		}
+
+		for _, token := range historicalTokens {
+			cleanKey := strings.TrimPrefix(token.Key, "sk-")
+			if cleanKey == "" {
+				continue
+			}
+
+			var count int64
+			if err := tx.Model(&model.Token{}).Where(&model.Token{Key: cleanKey}).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				continue
+			}
+
+			name := token.Name
+			if name == "" {
+				name = "Default API Key"
+			}
+			createdTime := token.CreatedTime
+			if createdTime <= 0 {
+				createdTime = common.GetTimestamp()
+			}
+			expiredTime := token.ExpiredTime
+			if expiredTime == 0 {
+				expiredTime = -1
+			}
+
+			migratedToken := model.Token{
+				UserId:         localUser.Id,
+				Name:           name,
+				Key:            cleanKey,
+				Status:         common.TokenStatusEnabled,
+				RemainQuota:    0,
+				UnlimitedQuota: true,
+				CreatedTime:    createdTime,
+				AccessedTime:   common.GetTimestamp(),
+				ExpiredTime:    expiredTime,
+				Group:          model.LegacySubRouterGroup,
+			}
+			if err := tx.Create(&migratedToken).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	localUser.Password = hashedPassword
+	if email != "" && localUser.Email == "" {
+		localUser.Email = model.NormalizeEmail(email)
+	}
+	if displayName != "" && localUser.DisplayName == "" {
+		localUser.DisplayName = displayName
+	}
+	if err := model.PublishUserAuthCache(localUser.Id); err != nil {
+		return nil, err
+	}
+	if _, err := model.RevokeAllUserSessions(localUser.Id, "legacy password migration"); err != nil {
+		return nil, err
+	}
+	common.SysLog(fmt.Sprintf("[Migration] Completed one-time password and API key migration for user ID %d", localUser.Id))
 
 	return &localUser, nil
 }

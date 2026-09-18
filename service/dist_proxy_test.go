@@ -116,7 +116,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	require.NoError(t, os.Setenv("SQL_DSN", "local"))
 	require.NoError(t, model.InitDB())
-	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.Token{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.Token{}, &model.UserSession{}))
 
 	defer func() {
 		if sqlDB, err := model.DB.DB(); err == nil {
@@ -125,13 +125,31 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 		_ = os.Unsetenv("SQL_DSN")
 	}()
 
-	// Mock upstream SubRouter server for login and token list
+	legacySetting := `{"subrouter_id":88}`
+	legacyUser := model.User{Username: "valid_old_user", Password: "", DisplayName: "Old SubRouter User", Email: "olduser@subrouter.ai", Status: common.UserStatusEnabled, Quota: 0, Setting: legacySetting, AffCode: "legacy01"}
+	require.NoError(t, model.DB.Create(&legacyUser).Error)
+	wrongPasswordUser := model.User{Username: "wrong_user", Password: "", Status: common.UserStatusEnabled, Setting: `{"subrouter_id":89}`, AffCode: "legacy02"}
+	require.NoError(t, model.DB.Create(&wrongPasswordUser).Error)
+	tokenFailureUser := model.User{Username: "token_failure_user", Password: "", Status: common.UserStatusEnabled, Setting: `{"subrouter_id":90}`, AffCode: "legacy03"}
+	require.NoError(t, model.DB.Create(&tokenFailureUser).Error)
+	unmarkedUser := model.User{Username: "unmarked_user", Password: "", Status: common.UserStatusEnabled, Setting: `{}`, AffCode: "legacy04"}
+	require.NoError(t, model.DB.Create(&unmarkedUser).Error)
+	migratedHash, err := common.HashAccountPassword("existing_password_123")
+	require.NoError(t, err)
+	alreadyMigratedUser := model.User{Username: "already_migrated", Password: migratedHash, Status: common.UserStatusEnabled, Setting: `{"subrouter_id":91}`, AffCode: "legacy05"}
+	require.NoError(t, model.DB.Create(&alreadyMigratedUser).Error)
+
+	loginRequests := 0
+	tokenRequests := 0
+
+	// Mock upstream SubRouter server for login and token list.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/dist/user/login":
+			loginRequests++
 			body, _ := io.ReadAll(r.Body)
 			if strings.Contains(string(body), "valid_old_user") && strings.Contains(string(body), "secret_pass_123") {
-				http.SetCookie(w, &http.Cookie{Name: "session", Value: "upstream_sess_tok"})
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "upstream_sess_tok", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{
@@ -146,12 +164,26 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 						}
 					}
 				}`))
+			} else if strings.Contains(string(body), "token_failure_user") {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "token_failure", Path: "/"})
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":90,"username":"token_failure_user"}}}`))
 			} else {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"success": false, "message": "用户名或密码错误"}`))
 			}
-		case "/api/dist/token/list":
-			// Check cookie
+		case "/api/dist/token/list", "/api/token/list":
+			tokenRequests++
+			cookie, err := r.Cookie("session")
+			if err != nil || cookie.Value == "token_failure" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false}`))
+				return
+			}
+			if cookie.Value != "upstream_sess_tok" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{
@@ -179,16 +211,26 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 		_ = os.Unsetenv("SUBROUTER_BASE_URL")
 	}()
 
-	// 1. Failed credentials test
-	_, err := AuthenticateAndMigrateSubRouterUser("wrong_user", "wrong_pass")
-	require.ErrorIs(t, err, ErrSubRouterAuthFailed)
+	// Accounts that are absent, unmarked, or already migrated must never reach upstream.
+	_, err = AuthenticateAndMigrateSubRouterUser("absent_user", "irrelevant_password")
+	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
+	_, err = AuthenticateAndMigrateSubRouterUser("unmarked_user", "irrelevant_password")
+	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
+	_, err = AuthenticateAndMigrateSubRouterUser("already_migrated", "wrong_password")
+	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
+	assert.Equal(t, 0, loginRequests)
 
-	// 2. Successful migration test
+	// An eligible legacy account may reach upstream, but bad credentials do not migrate it.
+	_, err = AuthenticateAndMigrateSubRouterUser("wrong_user", "wrong_pass")
+	require.ErrorIs(t, err, ErrSubRouterAuthFailed)
+	assert.Equal(t, 1, loginRequests)
+
+	// Successful upstream login carries its session cookie to the key-list request.
 	user, err := AuthenticateAndMigrateSubRouterUser("valid_old_user", "secret_pass_123")
 	require.NoError(t, err)
 	require.NotNil(t, user)
 
-	// Assert user created with STRICT zero quota (zero-capital principle)
+	// The pre-synchronized user keeps strict zero quota and receives a local hash.
 	assert.Equal(t, "valid_old_user", user.Username)
 	assert.Equal(t, "olduser@subrouter.ai", user.Email)
 	assert.Equal(t, 0, user.Quota, "Migrated user MUST have 0 quota (operator does not front capital)")
@@ -201,6 +243,24 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, "Historical Project Key", token.Name)
 	assert.Equal(t, user.Id, token.UserId)
 	assert.Equal(t, "subrouter", token.Group, "Migrated token must have group tagged as subrouter")
+	assert.Equal(t, 2, loginRequests)
+	assert.Equal(t, 1, tokenRequests)
+
+	// Once the password is present, another migration attempt cannot call or overwrite upstream.
+	_, err = AuthenticateAndMigrateSubRouterUser("valid_old_user", "replacement_password_123")
+	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
+	assert.Equal(t, 2, loginRequests)
+	var persisted model.User
+	require.NoError(t, model.DB.First(&persisted, legacyUser.Id).Error)
+	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", persisted.Password))
+	assert.False(t, common.ValidatePasswordAndHash("replacement_password_123", persisted.Password))
+
+	// A key-list failure leaves the password blank so a safe retry remains possible.
+	_, err = AuthenticateAndMigrateSubRouterUser("token_failure_user", "secret_pass_123")
+	require.ErrorIs(t, err, ErrSubRouterTokenSyncFailed)
+	persisted = model.User{}
+	require.NoError(t, model.DB.First(&persisted, tokenFailureUser.Id).Error)
+	assert.Empty(t, persisted.Password)
 }
 
 func TestSyncCustomersFromRecords(t *testing.T) {
