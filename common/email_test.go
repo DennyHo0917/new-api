@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -293,6 +295,24 @@ func TestSendEmailUsesExplicitStartTLSWithInsecureCertificate(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for SMTP DATA")
 	}
+}
+
+func TestSendEmailUsesConfiguredHTTPRelay(t *testing.T) {
+	var payload map[string]string
+	relay := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "Bearer relay-secret", request.Header.Get("Authorization"))
+		require.NoError(t, DecodeJson(request.Body, &payload))
+		response.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(relay.Close)
+	t.Setenv("EMAIL_RELAY_URL", relay.URL)
+	t.Setenv("EMAIL_RELAY_SECRET", "relay-secret")
+
+	require.NoError(t, SendEmail("Verification", "receiver@example.com", "<p>123456</p>"))
+	require.Equal(t, map[string]string{
+		"to": "receiver@example.com", "subject": "Verification", "html": "<p>123456</p>",
+	}, payload)
 }
 
 func TestSendEmailExplicitStartTLSRequiresServerSupport(t *testing.T) {

@@ -244,6 +244,38 @@ func SendEmailVerification(c *gin.Context) {
 	return
 }
 
+func DistSendEmailVerification(c *gin.Context) {
+	var request struct {
+		Email string `json:"email"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	email, err := service.ValidateAccountEmail(request.Email)
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+
+	emailTaken := model.IsEmailAlreadyTaken(email)
+	code := common.GenerateVerificationCode(6)
+	subject := fmt.Sprintf("%s邮箱验证邮件", common.SystemName)
+	content := fmt.Sprintf("<p>您好，你正在进行%s邮箱验证。</p>"+
+		"<p>您的验证码为: <strong>%s</strong></p>"+
+		"<p>验证码 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, code, common.VerificationValidMinutes)
+	if err := common.SendEmail(subject, email, content); err != nil {
+		common.SysError("failed to send registration verification email: " + err.Error())
+		common.ApiError(c, errors.New("verification email could not be sent"))
+		return
+	}
+	// Sending in both cases keeps account existence out of the response and timing.
+	if !emailTaken {
+		common.RegisterVerificationCodeWithKey(email, code, common.EmailVerificationPurpose)
+	}
+	common.ApiSuccess(c, nil)
+}
+
 func SendPasswordResetEmail(c *gin.Context) {
 	email := model.NormalizeEmail(c.Query("email"))
 	if err := common.Validate.Var(email, "required,email"); err != nil {

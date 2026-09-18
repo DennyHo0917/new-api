@@ -1,10 +1,13 @@
 package common
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/smtp"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -76,6 +79,9 @@ func newSMTPClient(addr string) (*smtp.Client, error) {
 }
 
 func SendEmail(subject string, receiver string, content string) error {
+	if handled, err := sendEmailViaRelay(subject, receiver, content); handled {
+		return err
+	}
 	if SMTPFrom == "" { // for compatibility
 		SMTPFrom = SMTPAccount
 	}
@@ -133,4 +139,36 @@ func SendEmail(subject string, receiver string, content string) error {
 		SysError(fmt.Sprintf("failed to send email to %s: %v", receiver, err))
 	}
 	return err
+}
+
+func sendEmailViaRelay(subject string, receiver string, content string) (bool, error) {
+	relayURL := strings.TrimSpace(os.Getenv("EMAIL_RELAY_URL"))
+	relaySecret := strings.TrimSpace(os.Getenv("EMAIL_RELAY_SECRET"))
+	if relayURL == "" && relaySecret == "" {
+		return false, nil
+	}
+	if relayURL == "" || relaySecret == "" {
+		return true, fmt.Errorf("email relay configuration is incomplete")
+	}
+	payload, err := Marshal(map[string]string{
+		"to": receiver, "subject": subject, "html": content,
+	})
+	if err != nil {
+		return true, err
+	}
+	request, err := http.NewRequest(http.MethodPost, relayURL, bytes.NewReader(payload))
+	if err != nil {
+		return true, err
+	}
+	request.Header.Set("Authorization", "Bearer "+relaySecret)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return true, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return true, fmt.Errorf("email relay returned HTTP %d", response.StatusCode)
+	}
+	return true, nil
 }

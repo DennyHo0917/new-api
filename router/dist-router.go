@@ -64,8 +64,9 @@ func SetDistRouter(router *gin.Engine) {
 		distRouter.GET("/topup/info", controller.DistGetTopupInfo)
 		distRouter.POST("/topup/amount", controller.DistCalculateAmount)
 
-		distRouter.POST("/user/register", controller.Register)
-		distRouter.POST("/user/login", controller.DistLogin)
+		distRouter.POST("/user/email-verification", middleware.CriticalRateLimit(), middleware.EmailVerificationRateLimit(), controller.DistSendEmailVerification)
+		distRouter.POST("/user/register", middleware.CriticalRateLimit(), controller.DistRegister)
+		distRouter.POST("/user/login", middleware.CriticalRateLimit(), controller.DistLogin)
 		distRouter.POST("/user/logout", controller.DistLogout)
 		distRouter.GET("/oauth/:provider/start", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DistOAuthStart)
 		distRouter.GET("/oauth/:provider/callback", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DistOAuthCallback)

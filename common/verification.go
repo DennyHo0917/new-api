@@ -1,6 +1,7 @@
 package common
 
 import (
+	"crypto/subtle"
 	"strings"
 	"sync"
 	"time"
@@ -49,10 +50,14 @@ func VerifyCodeWithKey(key string, code string, purpose string) bool {
 	defer verificationMutex.Unlock()
 	value, okay := verificationMap[purpose+key]
 	now := time.Now()
-	if !okay || int(now.Sub(value.time).Seconds()) >= VerificationValidMinutes*60 {
+	if !okay {
 		return false
 	}
-	return code == value.code
+	if int(now.Sub(value.time).Seconds()) >= VerificationValidMinutes*60 {
+		delete(verificationMap, purpose+key)
+		return false
+	}
+	return len(code) == len(value.code) && subtle.ConstantTimeCompare([]byte(code), []byte(value.code)) == 1
 }
 
 func DeleteKey(key string, purpose string) {
