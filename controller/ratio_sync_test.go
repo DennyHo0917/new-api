@@ -46,7 +46,7 @@ func TestPricingSyncExpressionPriority(t *testing.T) {
 
 func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":{"billing_mode":{"deepseek-v4-pro":"tiered_expr","gemini-3-pro-image":"tiered_expr","gpt-image-2":"tiered_expr","plain":"tiered_expr"},"billing_expr":{"deepseek-v4-pro":"weekday(\"UTC\") > 0 ? tier(\"peak\", p * 1.32 + cr * 0.044 + c * 3.96) : tier(\"off_peak\", p * 0.66 + cr * 0.022 + c * 1.98)","gemini-3-pro-image":"tier(\"standard\", p * 2 + c * 120)","gpt-image-2":"tier(\"standard\", p * 5 + cr * 1.25 + c * 30)","plain":"tier(\"standard\", p * 2 + c * 8)"}}}`))
+		_, _ = w.Write([]byte(`{"data":{"billing_mode":{"deepseek-v4-pro":"tiered_expr","plain":"tiered_expr"},"billing_expr":{"deepseek-v4-pro":"weekday(\"UTC\") > 0 ? tier(\"peak\", p * 1.32 + cr * 0.044 + c * 3.96) : tier(\"off_peak\", p * 0.66 + cr * 0.022 + c * 1.98)","plain":"tier(\"standard\", p * 2 + c * 8)"}}}`))
 	}))
 	defer server.Close()
 
@@ -56,14 +56,35 @@ func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
 		officialPricingURL, officialPricingClient = previousURL, previousClient
 	})
 
-	modes, expressions, err := loadOfficialPeakPricing(t.Context(), map[string]bool{"deepseek-v4-pro-0813": true, "nano-banana-pro": true, "gpt-image-2-text-to-image": true, "plain": true})
+	modes, expressions, err := loadOfficialPeakPricing(t.Context(), map[string]bool{"deepseek-v4-pro-0813": true, "plain": true})
 	require.NoError(t, err)
 	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["deepseek-v4-pro-0813"])
 	assert.Equal(t, `tier("peak", p * 1.32 + cr * 0.044 + c * 3.96)`, expressions["deepseek-v4-pro"])
 	assert.Equal(t, expressions["deepseek-v4-pro"], expressions["deepseek-v4-pro-0813"])
-	assert.Equal(t, `tier("standard", p * 2 + c * 120)`, expressions["nano-banana-pro"])
-	assert.Equal(t, `tier("standard", p * 5 + cr * 1.25 + c * 30)`, expressions["gpt-image-2-text-to-image"])
 	assert.Equal(t, `tier("standard", p * 2 + c * 8)`, expressions["plain"])
+}
+
+func TestLoadUpstreamMediaPricingCopiesPricesWithMarkup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"data":[{"model_name":"image-call","category":"text-to-image","billing_type":"per_call","fixed_price":0.2},{"model_name":"video-expr","category":"video","billing_type":"tiered_expr","billing_expr":"tier(\"video\", (param(\"billing.seconds\") == nil ? 5 : float(param(\"billing.seconds\"))) * 2 * 1000000)","price_multiplier":2},{"model_name":"image-token","category":"image","billing_type":"per_token","input_price":0.004,"output_price":0.008},{"model_name":"chat","category":"chat","billing_type":"per_call","fixed_price":1}]}`))
+	}))
+	defer server.Close()
+
+	previousURL, previousClient := upstreamMediaPricingURL, upstreamMediaPricingClient
+	upstreamMediaPricingURL, upstreamMediaPricingClient = server.URL, server.Client()
+	t.Cleanup(func() {
+		upstreamMediaPricingURL, upstreamMediaPricingClient = previousURL, previousClient
+	})
+
+	prices, err := loadUpstreamMediaPricing(t.Context(), map[string]bool{
+		"image-call": true, "video-expr": true, "image-token": true, "chat": true,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 0.21, prices["image-call"]["ModelPrice"], 1e-12)
+	assert.Equal(t, billing_setting.BillingModeTieredExpr, prices["video-expr"]["billing_setting.billing_mode"])
+	assert.Equal(t, `tier("video", ((param("billing.seconds") == nil ? 5 : float(param("billing.seconds"))) * 2 * 1000000) * 2.100000)`, prices["video-expr"]["billing_setting.billing_expr"])
+	assert.NotContains(t, prices, "image-token")
+	assert.NotContains(t, prices, "chat")
 }
 
 func TestRatioConfigExportsEffectiveExpressions(t *testing.T) {
