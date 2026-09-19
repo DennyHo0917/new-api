@@ -102,6 +102,30 @@ func TestChannelModelGroupsRejectUnknownValues(t *testing.T) {
 	}
 }
 
+func TestChannelModelMultipliersValidateModelAndValue(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		multiplier map[string]float64
+		wantError  string
+	}{
+		{name: "valid", multiplier: map[string]float64{"chat-model": 0.7}},
+		{name: "free", multiplier: map[string]float64{"chat-model": 0}},
+		{name: "unknown model", multiplier: map[string]float64{"missing": 1}, wantError: "unknown model"},
+		{name: "negative", multiplier: map[string]float64{"chat-model": -1}, wantError: "invalid multiplier"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			channel := &Channel{Models: "chat-model", Group: "default"}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{ModelMultipliers: test.multiplier})
+			err := channel.ValidateSettings()
+			if test.wantError == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, test.wantError)
+		})
+	}
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",

@@ -70,10 +70,16 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		// normal group ratio
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	}
-	if multiplier, ok := ratio_setting.GetModelMultiplier(relayInfo.GetBillingModelName()); ok {
-		groupRatioInfo.GroupRatio = multiplier
-		groupRatioInfo.GroupSpecialRatio = 0
-		groupRatioInfo.HasSpecialRatio = false
+	if relayInfo.ChannelMeta != nil {
+		multiplier, ok := relayInfo.ChannelOtherSettings.ModelMultipliers[relayInfo.GetBillingModelName()]
+		if !ok {
+			multiplier, ok = relayInfo.ChannelOtherSettings.ModelMultipliers[relayInfo.GetOriginModelName()]
+		}
+		if ok {
+			groupRatioInfo.GroupRatio = multiplier
+			groupRatioInfo.GroupSpecialRatio = 0
+			groupRatioInfo.HasSpecialRatio = false
+		}
 	}
 
 	return groupRatioInfo
@@ -225,6 +231,17 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 		priceData.QuotaToPreConsume = quota
 	}
+	if usePrice {
+		priceData.EstimatedQuotaBeforeGroup = priceData.ApplyOtherRatiosToFloat(modelPrice * common.QuotaPerUnit)
+	} else if _, image := info.Request.(*dto.ImageRequest); image {
+		priceData.EstimatedQuotaBeforeGroup = priceData.ApplyOtherRatiosToFloat(info.ImageQuotaBeforeGroup)
+	} else {
+		preConsumedTokens := common.Max(promptTokens, common.PreConsumedQuota)
+		if meta.MaxTokens != 0 {
+			preConsumedTokens += meta.MaxTokens
+		}
+		priceData.EstimatedQuotaBeforeGroup = float64(preConsumedTokens) * modelRatio
+	}
 
 	if common.DebugEnabled {
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
@@ -298,6 +315,11 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		UsePrice:       usePrice,
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
+	}
+	if usePrice {
+		priceData.EstimatedQuotaBeforeGroup = modelPrice * common.QuotaPerUnit
+	} else {
+		priceData.EstimatedQuotaBeforeGroup = modelRatio / 2 * common.QuotaPerUnit
 	}
 	return priceData, nil
 }

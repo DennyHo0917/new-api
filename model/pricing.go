@@ -37,6 +37,8 @@ type Pricing struct {
 	ModelRatio             float64                              `json:"model_ratio"`
 	ModelPrice             float64                              `json:"model_price"`
 	ModelMultiplier        *float64                             `json:"model_multiplier,omitempty"`
+	GroupMinMultipliers    map[string]float64                   `json:"group_min_multipliers,omitempty"`
+	ChannelMultipliers     map[string][]*float64                `json:"-"`
 	OwnerBy                string                               `json:"owner_by"`
 	CompletionRatio        float64                              `json:"completion_ratio"`
 	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`
@@ -231,6 +233,7 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	channelMultipliers := make(map[string]map[string][]*float64)
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -239,6 +242,19 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+		byGroup := channelMultipliers[ability.Model]
+		if byGroup == nil {
+			byGroup = make(map[string][]*float64)
+			channelMultipliers[ability.Model] = byGroup
+		}
+		var settings dto.ChannelOtherSettings
+		var multiplier *float64
+		if common.UnmarshalJsonStr(ability.ChannelSettings, &settings) == nil {
+			if value, ok := settings.ModelMultipliers[ability.Model]; ok {
+				multiplier = common.GetPointer(value)
+			}
+		}
+		byGroup[ability.Group] = append(byGroup[ability.Group], multiplier)
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -332,6 +348,7 @@ func updatePricing() {
 		pricing := Pricing{
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
+			ChannelMultipliers:     channelMultipliers[model],
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
 		}
 
@@ -388,9 +405,6 @@ func updatePricing() {
 					pricing.BillingExpr = expr
 				}
 			}
-		}
-		if multiplier, ok := ratio_setting.GetModelMultiplier(model); ok {
-			pricing.ModelMultiplier = &multiplier
 		}
 		usageModel := model
 		plugin, ok := pluginGeneration.GetByModel(model)

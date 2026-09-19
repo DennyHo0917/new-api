@@ -198,6 +198,34 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 	return nil
 }
 
+// PrepareBillingForSelectedChannel refreshes the reservation after routing
+// chooses a channel whose model multiplier may differ from the first attempt.
+func PrepareBillingForSelectedChannel(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	if relayInfo == nil {
+		return nil
+	}
+	if relayInfo.TieredBillingSnapshot != nil {
+		return PrepareTieredBillingForSelectedGroup(c, relayInfo)
+	}
+	estimate, err := common.QuotaFromFloatStrict(relayInfo.PriceData.EstimatedQuotaBeforeGroup * relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	relayInfo.PriceData.QuotaToPreConsume = estimate
+	if relayInfo.PriceData.GroupRatioInfo.GroupRatio == 0 || estimate == 0 {
+		return nil
+	}
+	relayInfo.PriceData.FreeModel = false
+	if relayInfo.Billing == nil {
+		return PreConsumeBilling(c, estimate, relayInfo)
+	}
+	if err := relayInfo.Billing.Reserve(estimate); err != nil {
+		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+	}
+	relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+	return nil
+}
+
 // TryTieredSettle checks if the request uses tiered_expr billing and, if so,
 // computes the actual quota using the captured BillingSnapshot. Returns:
 //   - ok=true, quota, result  when tiered billing applies

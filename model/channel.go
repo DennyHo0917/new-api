@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -1051,6 +1052,20 @@ func (channel *Channel) ValidateSettings() error {
 				if _, ok := groups[group]; !ok {
 					return fmt.Errorf("model_groups contains unknown group: %s", group)
 				}
+			}
+		}
+	}
+	if len(channelOtherSettings.ModelMultipliers) > 0 {
+		models := make(map[string]struct{})
+		for _, model := range channel.GetModels() {
+			models[model] = struct{}{}
+		}
+		for model, multiplier := range channelOtherSettings.ModelMultipliers {
+			if _, ok := models[model]; !ok {
+				return fmt.Errorf("model_multipliers contains unknown model: %s", model)
+			}
+			if multiplier < 0 || math.IsNaN(multiplier) || math.IsInf(multiplier, 0) {
+				return fmt.Errorf("model_multipliers contains invalid multiplier for model: %s", model)
 			}
 		}
 	}

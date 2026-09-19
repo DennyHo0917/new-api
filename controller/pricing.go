@@ -35,6 +35,29 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 	return filtered
 }
 
+func applyMinimumChannelMultipliers(pricing []model.Pricing, groupRatio map[string]float64) {
+	for i := range pricing {
+		pricing[i].GroupMinMultipliers = make(map[string]float64)
+		for pricingGroup, variants := range pricing[i].ChannelMultipliers {
+			fallback, allowed := groupRatio[pricingGroup]
+			if !allowed {
+				continue
+			}
+			minimum := fallback
+			for index, override := range variants {
+				value := fallback
+				if override != nil {
+					value = *override
+				}
+				if index == 0 || value < minimum {
+					minimum = value
+				}
+			}
+			pricing[i].GroupMinMultipliers[pricingGroup] = minimum
+		}
+	}
+}
+
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
 	userId, exists := c.Get("id")
@@ -63,6 +86,7 @@ func GetPricing(c *gin.Context) {
 			delete(groupRatio, group)
 		}
 	}
+	applyMinimumChannelMultipliers(pricing, groupRatio)
 
 	c.JSON(200, gin.H{
 		"success":            true,

@@ -109,16 +109,13 @@ func TestFixedPricePreConsumeAndRealtimeRejection(t *testing.T) {
 	}
 }
 
-func TestManualModelPriceOverridesGroupRatio(t *testing.T) {
+func TestChannelModelMultiplierOverridesGroupRatio(t *testing.T) {
 	saved := map[string]string{}
 	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
 		saved[key] = value
 		return nil
 	}))
 	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
-	previousMultipliers := ratio_setting.ModelMultiplier2JSONString()
-	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelMultiplierByJSONString(previousMultipliers)) })
-	require.NoError(t, ratio_setting.UpdateModelMultiplierByJSONString(`{"manual-price":1.05}`))
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"billing_setting.billing_mode":    `{"manual-price":"tiered_expr"}`,
 		"billing_setting.billing_expr":    `{"manual-price":"tier(\"base\", p * 2 + c * 8)"}`,
@@ -127,7 +124,7 @@ func TestManualModelPriceOverridesGroupRatio(t *testing.T) {
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	info := &relaycommon.RelayInfo{OriginModelName: "manual-price", UserGroup: "discount", UsingGroup: "discount"}
+	info := &relaycommon.RelayInfo{OriginModelName: "manual-price", UserGroup: "discount", UsingGroup: "discount", ChannelMeta: &relaycommon.ChannelMeta{ChannelOtherSettings: dto.ChannelOtherSettings{ModelMultipliers: map[string]float64{"manual-price": 1.05}}}}
 	price, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 100})
 	require.NoError(t, err)
 	assert.Equal(t, 1.05, price.GroupRatioInfo.GroupRatio)

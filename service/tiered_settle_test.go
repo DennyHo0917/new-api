@@ -366,6 +366,27 @@ func TestPrepareTieredBillingForSelectedGroupUpdatesReservation(t *testing.T) {
 	assert.Equal(t, 100_000, relayInfo.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
 }
 
+func TestPrepareBillingForSelectedChannelUpdatesLegacyReservation(t *testing.T) {
+	billing := &recordingBillingSettler{preConsumedQuota: 40_000}
+	relayInfo := &relaycommon.RelayInfo{
+		Billing: billing,
+		PriceData: types.PriceData{
+			EstimatedQuotaBeforeGroup: 100_000,
+			GroupRatioInfo:            types.GroupRatioInfo{GroupRatio: 0.7},
+		},
+	}
+
+	require.Nil(t, PrepareBillingForSelectedChannel(nil, relayInfo))
+	assert.Equal(t, []int{70_000}, billing.reserveTargets)
+	assert.Equal(t, 70_000, relayInfo.PriceData.QuotaToPreConsume)
+	assert.Equal(t, 70_000, relayInfo.FinalPreConsumedQuota)
+
+	relayInfo.PriceData.GroupRatioInfo.GroupRatio = 0.2
+	require.Nil(t, PrepareBillingForSelectedChannel(nil, relayInfo))
+	assert.Equal(t, []int{70_000, 20_000}, billing.reserveTargets)
+	assert.Equal(t, 70_000, relayInfo.FinalPreConsumedQuota, "cheaper retry is refunded only after final settlement")
+}
+
 func TestPrepareTieredBillingForSelectedGroupStartsBillingAfterFreeGroup(t *testing.T) {
 	truncate(t)
 	gin.SetMode(gin.TestMode)

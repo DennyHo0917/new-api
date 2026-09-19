@@ -18,6 +18,33 @@ func GetModelPricingConfig(c *gin.Context) {
 	common.ApiSuccess(c, snapshot)
 }
 
+func GetChannelModelMultipliers(c *gin.Context) {
+	items, err := model.GetChannelModelMultipliers(c.Query("model"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, items)
+}
+
+func UpdateChannelModelMultiplier(c *gin.Context) {
+	var request struct {
+		ChannelID  int      `json:"channel_id"`
+		ModelName  string   `json:"model_name"`
+		Multiplier *float64 `json:"multiplier"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	if err := model.SetChannelModelMultiplier(request.ChannelID, request.ModelName, request.Multiplier); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	recordManageAudit(c, "channel.model_multiplier.update", map[string]any{"channel_id": request.ChannelID, "model": request.ModelName})
+	common.ApiSuccess(c, gin.H{"channel_id": request.ChannelID, "model_name": request.ModelName})
+}
+
 func PreviewModelPricingConversion(c *gin.Context) {
 	var request struct {
 		ModelName string              `json:"model_name"`

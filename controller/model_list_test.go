@@ -321,6 +321,21 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.Empty(t, missingExprPricing.BillingExpr)
 }
 
+func TestPricingUsesLowestReachableChannelMultiplier(t *testing.T) {
+	pricing := []model.Pricing{{
+		ModelName: "shared-model",
+		ChannelMultipliers: map[string][]*float64{
+			"standard": {common.GetPointer(0.7), common.GetPointer(0.5)},
+			"stable":   {nil, common.GetPointer(0.8)},
+		},
+	}}
+
+	applyMinimumChannelMultipliers(pricing, map[string]float64{"standard": 1, "stable": 0.6})
+
+	assert.Equal(t, 0.5, pricing[0].GroupMinMultipliers["standard"])
+	assert.Equal(t, 0.6, pricing[0].GroupMinMultipliers["stable"], "a channel without an override falls back to its group ratio")
+}
+
 func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T) {
 	withSelfUseModeEnabled(t)
 	db := setupModelListControllerTestDB(t)
