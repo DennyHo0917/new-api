@@ -67,24 +67,28 @@ func DistGetSiteInfo(c *gin.Context) {
 
 // DistGetSiteModels handles GET /api/dist/site/models
 func DistGetSiteModels(c *gin.Context) {
-	items := model.GetPricing()
+	items := append([]model.Pricing(nil), model.GetPricing()...)
+	ratios := ratio_setting.GetGroupRatioCopy()
+	applyMinimumChannelMultipliers(items, ratios)
 	c.JSON(http.StatusOK, gin.H{
 		"success":     true,
 		"data":        items,
 		"vendors":     model.GetVendors(),
-		"group_ratio": ratio_setting.GetGroupRatioCopy(),
+		"group_ratio": ratios,
 		"group_order": getGroupDisplayOrder(),
 	})
 }
 
 // DistGetSitePricing handles GET /api/dist/site/pricing
 func DistGetSitePricing(c *gin.Context) {
-	pricing := model.GetPricing()
+	pricing := append([]model.Pricing(nil), model.GetPricing()...)
+	ratios := ratio_setting.GetGroupRatioCopy()
+	applyMinimumChannelMultipliers(pricing, ratios)
 	c.JSON(http.StatusOK, gin.H{
 		"success":     true,
 		"data":        pricing,
 		"vendors":     model.GetVendors(),
-		"group_ratio": ratio_setting.GetGroupRatioCopy(),
+		"group_ratio": ratios,
 		"group_order": getGroupDisplayOrder(),
 	})
 }
