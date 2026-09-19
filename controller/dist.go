@@ -6,7 +6,6 @@ import (
 	"html"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +73,7 @@ func DistGetSiteModels(c *gin.Context) {
 		"data":        items,
 		"vendors":     model.GetVendors(),
 		"group_ratio": ratio_setting.GetGroupRatioCopy(),
+		"group_order": getGroupDisplayOrder(),
 	})
 }
 
@@ -85,19 +85,12 @@ func DistGetSitePricing(c *gin.Context) {
 		"data":        pricing,
 		"vendors":     model.GetVendors(),
 		"group_ratio": ratio_setting.GetGroupRatioCopy(),
+		"group_order": getGroupDisplayOrder(),
 	})
 }
 
 func distGroupNames() []string {
-	ratio := ratio_setting.GetGroupRatioCopy()
-	names := make([]string, 0, len(ratio))
-	for name := range ratio {
-		if strings.TrimSpace(name) != "" {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
+	return getGroupDisplayOrder()
 }
 
 func distGroupName(value string) string {

@@ -2,6 +2,8 @@ package controller
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -11,6 +13,36 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const groupDisplayOrderOption = "DistGroupOrder"
+
+func getGroupDisplayOrder() []string {
+	ratios := ratio_setting.GetGroupRatioCopy()
+	common.OptionMapRWMutex.RLock()
+	raw := common.Interface2String(common.OptionMap[groupDisplayOrderOption])
+	common.OptionMapRWMutex.RUnlock()
+
+	configured := make([]string, 0, len(ratios))
+	_ = common.UnmarshalJsonStr(raw, &configured)
+	order := make([]string, 0, len(ratios))
+	seen := make(map[string]bool, len(ratios))
+	for _, name := range configured {
+		name = strings.TrimSpace(name)
+		if _, exists := ratios[name]; !exists || seen[name] {
+			continue
+		}
+		seen[name] = true
+		order = append(order, name)
+	}
+	missing := make([]string, 0, len(ratios)-len(order))
+	for name := range ratios {
+		if !seen[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return append(order, missing...)
+}
 
 func GetGroups(c *gin.Context) {
 	groupNames := make([]string, 0)
@@ -51,6 +83,32 @@ func UpdateGroupRatios(c *gin.Context) {
 	}
 	recordManageAudit(c, "group.ratios.update", map[string]any{"groups": request.Ratios})
 	common.ApiSuccess(c, request.Ratios)
+}
+
+func GetGroupDisplayOrder(c *gin.Context) {
+	common.ApiSuccess(c, getGroupDisplayOrder())
+}
+
+func UpdateGroupDisplayOrder(c *gin.Context) {
+	var request struct {
+		Order []string `json:"order"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || request.Order == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid group display order"})
+		return
+	}
+	raw, err := common.Marshal(request.Order)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOption(groupDisplayOrderOption, string(raw)); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	order := getGroupDisplayOrder()
+	recordManageAudit(c, "group.display_order.update", map[string]any{"order": order})
+	common.ApiSuccess(c, order)
 }
 
 func GetUserGroups(c *gin.Context) {

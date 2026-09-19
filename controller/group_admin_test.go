@@ -45,3 +45,33 @@ func TestUpdateGroupRatiosPersistsValidatedValues(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	assert.Equal(t, float64(0.75), ratio_setting.GetGroupRatio("partner"))
 }
+
+func TestUpdateGroupDisplayOrderPersistsKnownGroups(t *testing.T) {
+	db := openTokenControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.AuditLog{}))
+	require.NoError(t, db.Create(&model.User{Id: 8, Username: "group-order-admin", Role: common.RoleAdminUser}).Error)
+
+	previousOptions := common.OptionMap
+	common.OptionMap = map[string]string{}
+	previousRatios := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"fast":0.8,"stable":1.2}`))
+	t.Cleanup(func() {
+		common.OptionMap = previousOptions
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousRatios))
+	})
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/group/display-order", map[string]any{
+		"order": []string{"stable", "unknown", "fast", "stable"},
+	}, 8)
+	ctx.Set("role", common.RoleAdminUser)
+	UpdateGroupDisplayOrder(ctx)
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var order []string
+	require.NoError(t, common.Unmarshal(response.Data, &order))
+	assert.Equal(t, []string{"stable", "fast", "default"}, order)
+
+	var option model.Option
+	require.NoError(t, db.Where("key = ?", groupDisplayOrderOption).First(&option).Error)
+	assert.JSONEq(t, `["stable","unknown","fast","stable"]`, option.Value)
+}
