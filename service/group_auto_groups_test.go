@@ -47,6 +47,16 @@ func TestGetRequestAutoGroupsInheritedListIsNotLimited(t *testing.T) {
 	assert.Equal(t, []string{"vip", "default", "svip"}, groups)
 }
 
+func TestGetRequestAutoGroupsInheritsEveryPricedGroup(t *testing.T) {
+	configureRequestAutoGroupsTest(t)
+	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`["default"]`))
+	ctx := newRequestAutoGroupsContext()
+
+	groups := GetRequestAutoGroups(ctx, "default")
+
+	assert.Equal(t, []string{"default", "svip", "vip"}, groups)
+}
+
 func TestGetRequestAutoGroupsFiltersBeforeApplyingCurrentLimit(t *testing.T) {
 	configureRequestAutoGroupsTest(t)
 	ctx := newRequestAutoGroupsContext()

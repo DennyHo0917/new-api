@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -57,7 +58,7 @@ func GetUserAutoGroup(userGroup string) []string {
 	autoGroups := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, group := range setting.GetAutoGroups() {
-		if !IsUserSelectableGroup(userGroup, group) {
+		if group == "auto" || !ratio_setting.ContainsGroupRatio(group) {
 			continue
 		}
 		if _, ok := seen[group]; ok {
@@ -66,6 +67,17 @@ func GetUserAutoGroup(userGroup string) []string {
 		seen[group] = struct{}{}
 		autoGroups = append(autoGroups, group)
 	}
+	remaining := make([]string, 0)
+	for group := range ratio_setting.GetGroupRatioCopy() {
+		if group == "auto" {
+			continue
+		}
+		if _, ok := seen[group]; !ok {
+			remaining = append(remaining, group)
+		}
+	}
+	sort.Strings(remaining)
+	autoGroups = append(autoGroups, remaining...)
 	return autoGroups
 }
 
