@@ -297,7 +297,11 @@ func (channel *Channel) GetModels() []string {
 	if channel.Models == "" {
 		return []string{}
 	}
-	return strings.Split(strings.Trim(channel.Models, ","), ",")
+	models := strings.Split(strings.Trim(channel.Models, ","), ",")
+	for i, model := range models {
+		models[i] = strings.TrimSpace(model)
+	}
+	return models
 }
 
 func (channel *Channel) GetGroups() []string {
@@ -309,6 +313,21 @@ func (channel *Channel) GetGroups() []string {
 		groups[i] = strings.TrimSpace(group)
 	}
 	return groups
+}
+
+func (channel *Channel) GetGroupsForModel(model string) []string {
+	groups := channel.GetGroups()
+	modelGroups := channel.GetOtherSettings().ModelGroups
+	if len(modelGroups) == 0 {
+		return groups
+	}
+	if configured := modelGroups[model]; len(configured) > 0 {
+		return configured
+	}
+	if len(groups) > 0 {
+		return groups[:1]
+	}
+	return nil
 }
 
 func (channel *Channel) GetOtherInfo() map[string]any {
@@ -1011,6 +1030,29 @@ func (channel *Channel) ValidateSettings() error {
 	}
 	if err := channelOtherSettings.ValidateToolLossPolicy(); err != nil {
 		return err
+	}
+	if len(channelOtherSettings.ModelGroups) > 0 {
+		models := make(map[string]struct{})
+		for _, model := range channel.GetModels() {
+			models[model] = struct{}{}
+		}
+		groups := make(map[string]struct{})
+		for _, group := range channel.GetGroups() {
+			groups[group] = struct{}{}
+		}
+		for model, configuredGroups := range channelOtherSettings.ModelGroups {
+			if _, ok := models[model]; !ok {
+				return fmt.Errorf("model_groups contains unknown model: %s", model)
+			}
+			if len(configuredGroups) == 0 {
+				return fmt.Errorf("model_groups must assign at least one group to model: %s", model)
+			}
+			for _, group := range configuredGroups {
+				if _, ok := groups[group]; !ok {
+					return fmt.Errorf("model_groups contains unknown group: %s", group)
+				}
+			}
+		}
 	}
 	if preset := common.GetAdvancedCustomPreset(channel.Type); preset != nil {
 		channelOtherSettings.AdvancedCustom = preset

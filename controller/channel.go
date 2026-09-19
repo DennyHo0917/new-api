@@ -1223,6 +1223,9 @@ func UpdateChannel(c *gin.Context) {
 	if channel.Group != originChannel.Group {
 		changedFields = append(changedFields, "group")
 	}
+	if channel.OtherSettings != originChannel.OtherSettings {
+		changedFields = append(changedFields, "settings")
+	}
 	if channel.Type != originChannel.Type {
 		changedFields = append(changedFields, "type")
 	}

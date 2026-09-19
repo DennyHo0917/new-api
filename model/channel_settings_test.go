@@ -50,6 +50,58 @@ func TestChannelValidateSettingsRejectsInvalidHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestChannelModelGroupsCreateExactAbilities(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "model-groups.db")), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&Ability{}))
+
+	channel := &Channel{
+		Id:     42,
+		Models: "chat-model,image-model",
+		Group:  "default,premium",
+		Status: common.ChannelStatusEnabled,
+	}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{ModelGroups: map[string][]string{
+		"chat-model":  {"default"},
+		"image-model": {"premium"},
+	}})
+	require.NoError(t, channel.ValidateSettings())
+	require.NoError(t, channel.AddAbilities(db))
+
+	var abilities []Ability
+	require.NoError(t, db.Order("model").Find(&abilities).Error)
+	require.Len(t, abilities, 2)
+	assert.Equal(t, "default", abilities[0].Group)
+	assert.Equal(t, "chat-model", abilities[0].Model)
+	assert.Equal(t, "premium", abilities[1].Group)
+	assert.Equal(t, "image-model", abilities[1].Model)
+}
+
+func TestChannelModelGroupsRejectUnknownValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		modelGroups map[string][]string
+		wantErr     string
+	}{
+		{name: "unknown model", modelGroups: map[string][]string{"missing": {"default"}}, wantErr: "unknown model"},
+		{name: "unknown group", modelGroups: map[string][]string{"chat-model": {"missing"}}, wantErr: "unknown group"},
+		{name: "empty group list", modelGroups: map[string][]string{"chat-model": {}}, wantErr: "at least one group"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{Models: "chat-model", Group: "default"}
+			channel.SetOtherSettings(dto.ChannelOtherSettings{ModelGroups: tt.modelGroups})
+			err := channel.ValidateSettings()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(t *testing.T) {
 	inferenceRoute := dto.AdvancedCustomRoute{
 		IncomingPath: "/v1/chat/completions",
