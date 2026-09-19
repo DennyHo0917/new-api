@@ -78,6 +78,8 @@ func SetDistRouter(router *gin.Engine) {
 	{
 		authGroup.GET("/user/self", controller.DistGetUserSelf)
 		authGroup.PUT("/user/password", controller.DistUpdateUserPassword)
+		authGroup.POST("/user/email/bind-verification", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("account-security"), middleware.EmailVerificationRateLimit(), middleware.DisableCache(), controller.DistSendEmailBindVerification)
+		authGroup.PUT("/user/email", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("account-security"), middleware.DisableCache(), controller.DistBindUserEmail)
 		authGroup.GET("/user/usage", controller.DistGetUserUsage)
 		authGroup.GET("/user/logs", controller.GetUserLogs)
 		authGroup.GET("/user/logs/stat", controller.GetLogsSelfStat)

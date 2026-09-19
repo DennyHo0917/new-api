@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -316,7 +317,7 @@ func (mailbox *securityMailbox) code(t *testing.T, receiver string) string {
 	mailbox.mutex.Lock()
 	defer mailbox.mutex.Unlock()
 	for index := len(mailbox.mail[receiver]) - 1; index >= 0; index-- {
-		match := regexp.MustCompile(`<strong>([0-9]{6})</strong>`).FindStringSubmatch(mailbox.mail[receiver][index])
+		match := regexp.MustCompile(`<strong>([0-9a-f]{6})</strong>`).FindStringSubmatch(mailbox.mail[receiver][index])
 		if len(match) == 2 {
 			return match[1]
 		}
@@ -340,6 +341,56 @@ func startSecurityEmailBinding(t *testing.T, identity service.AuthIdentity, emai
 	require.NoError(t, common.Unmarshal(body.Data, &flow))
 	require.NotEmpty(t, flow.FlowToken)
 	return flow
+}
+
+func TestDistInitialEmailBindingIsRecentSessionBoundAndSingleUse(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	mailbox := newSecurityMailbox(t)
+
+	send := securityEnrollmentRequest(http.MethodPost, "/api/dist/user/email/bind-verification", `{"email":"New@Example.com"}`, "", identity, DistSendEmailBindVerification)
+	require.Contains(t, send.Body.String(), `"success":true`, send.Body.String())
+	code := mailbox.code(t, "new@example.com")
+
+	wrong := securityEnrollmentRequest(http.MethodPut, "/api/dist/user/email", `{"email":"new@example.com","code":"000000"}`, "", identity, DistBindUserEmail)
+	assert.Contains(t, wrong.Body.String(), `"success":false`)
+
+	bind := securityEnrollmentRequest(http.MethodPut, "/api/dist/user/email", fmt.Sprintf(`{"email":"new@example.com","code":%q}`, code), "", identity, DistBindUserEmail)
+	assert.Contains(t, bind.Body.String(), `"success":true`)
+	stored, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, "new@example.com", stored.Email)
+
+	replay := securityEnrollmentRequest(http.MethodPut, "/api/dist/user/email", fmt.Sprintf(`{"email":"new@example.com","code":%q}`, code), "", identity, DistBindUserEmail)
+	assert.Equal(t, http.StatusForbidden, replay.Code)
+}
+
+func TestDistInitialEmailBindingRejectsExpiredCodeAndStaleSession(t *testing.T) {
+	t.Run("expired code", func(t *testing.T) {
+		_, identity := setupSecurityEnrollmentTest(t)
+		mailbox := newSecurityMailbox(t)
+		send := securityEnrollmentRequest(http.MethodPost, "/api/dist/user/email/bind-verification", `{"email":"expired@example.com"}`, "", identity, DistSendEmailBindVerification)
+		require.Contains(t, send.Body.String(), `"success":true`, send.Body.String())
+		code := mailbox.code(t, "expired@example.com")
+		previousMinutes := common.VerificationValidMinutes
+		common.VerificationValidMinutes = 0
+		t.Cleanup(func() { common.VerificationValidMinutes = previousMinutes })
+		bind := securityEnrollmentRequest(http.MethodPut, "/api/dist/user/email", fmt.Sprintf(`{"email":"expired@example.com","code":%q}`, code), "", identity, DistBindUserEmail)
+		assert.Contains(t, bind.Body.String(), `"success":false`)
+	})
+
+	t.Run("stale session", func(t *testing.T) {
+		_, identity := setupSecurityEnrollmentTest(t)
+		reauthenticatedAt := time.Now().Add(-distEmailBindingReauthenticationAge - time.Minute).Unix()
+		require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", identity.SessionID).Update("created_at", reauthenticatedAt).Error)
+		response := securityEnrollmentRequest(http.MethodPost, "/api/dist/user/email/bind-verification", `{"email":"stale@example.com"}`, "", identity, DistSendEmailBindVerification)
+		assert.Equal(t, http.StatusForbidden, response.Code)
+	})
+
+	t.Run("non-session credential", func(t *testing.T) {
+		setupSecurityEnrollmentTest(t)
+		response := securityEnrollmentRequest(http.MethodPost, "/api/dist/user/email/bind-verification", `{"email":"pat@example.com"}`, "", service.AuthIdentity{UserID: 1, UserAuthVersion: 1}, DistSendEmailBindVerification)
+		assert.Equal(t, http.StatusForbidden, response.Code)
+	})
 }
 
 func TestSecurityAccountRequiresProofBeforeMutation(t *testing.T) {

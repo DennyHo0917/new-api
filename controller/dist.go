@@ -3,11 +3,13 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"html"
 	"math"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -392,6 +394,116 @@ func DistGetUserSelf(c *gin.Context) {
 			"commission_rate":         model.AffiliateCommissionRate(user.AffCount),
 		},
 	})
+}
+
+const distEmailBindingReauthenticationAge = 10 * time.Minute
+
+type distEmailBindingRequest struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
+}
+
+func distEmailBindingIdentity(c *gin.Context) (service.AuthIdentity, *model.User, error) {
+	identity := service.AuthIdentity{
+		UserID:          c.GetInt("id"),
+		SessionID:       c.GetString("session_id"),
+		UserAuthVersion: c.GetInt64("auth_version"),
+		SessionVersion:  c.GetInt64("session_version"),
+	}
+	if identity.UserID <= 0 || identity.SessionID == "" {
+		return service.AuthIdentity{}, nil, service.ErrAuthTokenInvalid
+	}
+	session, _, err := service.ValidateLoginSession(identity)
+	if err != nil {
+		return service.AuthIdentity{}, nil, err
+	}
+	if time.Since(time.Unix(session.CreatedAt, 0)) > distEmailBindingReauthenticationAge {
+		return service.AuthIdentity{}, nil, errors.New("recent authentication required")
+	}
+	user, err := model.GetUserById(identity.UserID, false)
+	if err != nil {
+		return service.AuthIdentity{}, nil, err
+	}
+	if model.NormalizeEmail(user.Email) != "" {
+		return service.AuthIdentity{}, nil, errors.New("email is already bound")
+	}
+	return identity, user, nil
+}
+
+func distEmailBindingKey(userID int, email string) string {
+	return strconv.Itoa(userID) + ":" + email
+}
+
+// DistSendEmailBindVerification supports the existing production frontend's
+// initial-email binding contract. Email replacement stays on the stronger
+// security-proof flow and is deliberately rejected here.
+func DistSendEmailBindVerification(c *gin.Context) {
+	identity, _, err := distEmailBindingIdentity(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "请重新登录后绑定邮箱"})
+		return
+	}
+	var request distEmailBindingRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	email, err := service.ValidateAccountEmail(request.Email)
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	code := common.GenerateVerificationCode(6)
+	subject := common.SystemName + " — Confirm your email address"
+	content := fmt.Sprintf("<p>Confirm linking this email address to your account.</p><p>Verification code: <strong>%s</strong></p><p>This code expires in %d minutes. If you did not request this change, do not share this code.</p>", html.EscapeString(code), common.VerificationValidMinutes)
+	if err := common.SendEmail(subject, email, content); err != nil {
+		common.SysError("failed to send email binding verification: " + err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": "验证邮件发送失败"})
+		return
+	}
+	if !model.IsEmailAlreadyTaken(email) {
+		common.RegisterVerificationCodeWithKey(distEmailBindingKey(identity.UserID, email), code, common.EmailBindingPurpose)
+	}
+	recordUserSecurityAudit(c, identity.UserID, "user.email_binding_compat_start", map[string]any{"success": true})
+	common.ApiSuccess(c, nil)
+}
+
+func DistBindUserEmail(c *gin.Context) {
+	identity, user, err := distEmailBindingIdentity(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "请重新登录后绑定邮箱"})
+		return
+	}
+	succeeded := false
+	defer func() {
+		recordUserSecurityAudit(c, identity.UserID, "user.email_binding_compat_bind", map[string]any{"success": succeeded})
+	}()
+	var request distEmailBindingRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	email, err := service.ValidateAccountEmail(request.Email)
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
+	key := distEmailBindingKey(identity.UserID, email)
+	if !common.VerifyCodeWithKey(key, strings.TrimSpace(request.Code), common.EmailBindingPurpose) {
+		common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
+		return
+	}
+	if err := model.BindEmailToUser(user, email); err != nil {
+		if errors.Is(err, model.ErrEmailAlreadyTaken) {
+			common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
+			return
+		}
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		return
+	}
+	common.DeleteKey(key, common.EmailBindingPurpose)
+	succeeded = true
+	common.ApiSuccess(c, nil)
 }
 
 // DistGetUserUsage handles GET /api/dist/user/usage
