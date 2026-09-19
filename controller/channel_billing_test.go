@@ -114,3 +114,14 @@ func TestGetDeepSeekBalanceUSD(t *testing.T) {
 		})
 	}
 }
+
+func TestSubRouterBalanceConversion(t *testing.T) {
+	assert.True(t, isSubRouterCNYBalanceBaseURL("https://apiroute.subrouter.ai"))
+	assert.True(t, isSubRouterCNYBalanceBaseURL("https://APIROUTE.SUBROUTER.AI/v1"))
+	assert.False(t, isSubRouterCNYBalanceBaseURL("https://subrouter.ai"))
+	assert.False(t, isSubRouterCNYBalanceBaseURL("https://apiroute.subrouter.com"))
+
+	balance, err := convertCNYBalanceToUSD(49.8716, 7.12)
+	require.NoError(t, err)
+	assert.InDelta(t, 49.8716/7.12, balance, 1e-12)
+}

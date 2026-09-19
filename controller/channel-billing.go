@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -309,16 +311,19 @@ func getDeepSeekBalanceUSD(response DeepSeekUsageResponse, usdExchangeRate float
 	if cnyBalance == nil {
 		return 0, errors.New("currency USD or CNY not found")
 	}
+	balanceCNY, err := strconv.ParseFloat(*cnyBalance, 64)
+	if err != nil {
+		return 0, err
+	}
+	return convertCNYBalanceToUSD(balanceCNY, usdExchangeRate)
+}
+
+func convertCNYBalanceToUSD(balanceCNY, usdExchangeRate float64) (float64, error) {
 	if math.IsNaN(usdExchangeRate) || math.IsInf(usdExchangeRate, 0) {
 		return 0, errors.New("USD exchange rate must be finite")
 	}
 	if usdExchangeRate <= 0 {
 		return 0, errors.New("USD exchange rate must be greater than zero")
-	}
-
-	balanceCNY, err := strconv.ParseFloat(*cnyBalance, 64)
-	if err != nil {
-		return 0, err
 	}
 	if math.IsNaN(balanceCNY) || math.IsInf(balanceCNY, 0) {
 		return 0, errors.New("CNY balance must be finite")
@@ -334,6 +339,11 @@ func getDeepSeekBalanceUSD(response DeepSeekUsageResponse, usdExchangeRate float
 		return 0, errors.New("converted USD balance must be non-negative")
 	}
 	return balanceUSD, nil
+}
+
+func isSubRouterCNYBalanceBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	return err == nil && strings.EqualFold(parsed.Hostname(), "apiroute.subrouter.ai")
 }
 
 func updateChannelDeepSeekBalance(channel *model.Channel) (float64, error) {
@@ -574,6 +584,15 @@ func updateStandardChannelBalance(channel *model.Channel) (float64, error) {
 		return 0, err
 	}
 	balance := subscription.HardLimitUSD - usage.TotalUsage/100
+	if isSubRouterCNYBalanceBaseURL(baseURL) {
+		balance, err = convertCNYBalanceToUSD(
+			balance,
+			service.GetUSDCNYExchangeRate(context.Background(), operation_setting.Price),
+		)
+		if err != nil {
+			return 0, err
+		}
+	}
 	channel.UpdateBalance(balance)
 	return balance, nil
 }
