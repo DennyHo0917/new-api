@@ -213,7 +213,7 @@ func writeLoginResponse(c *gin.Context, user *model.User, bundle *service.AuthBu
 }
 
 func Register(c *gin.Context) {
-	register(c, common.EmailVerificationEnabled)
+	register(c, true)
 }
 
 func DistRegister(c *gin.Context) {

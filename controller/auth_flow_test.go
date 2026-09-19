@@ -321,31 +321,40 @@ func TestSecurityLoginFactorStateDoesNotAddPasswordLoginQueries(t *testing.T) {
 	assert.Equal(t, 2, queries, "only the existing credential lookup and the replacement factor-state lookup run before the challenge")
 }
 
-func TestDistRegistrationAlwaysRequiresAndConsumesEmailVerification(t *testing.T) {
-	setupSecurityEnrollmentTest(t)
-	previousRegister, previousPasswordRegister := common.RegisterEnabled, common.PasswordRegisterEnabled
-	previousEmailVerification := common.EmailVerificationEnabled
-	common.RegisterEnabled, common.PasswordRegisterEnabled = true, true
-	common.EmailVerificationEnabled = false
-	t.Cleanup(func() {
-		common.RegisterEnabled, common.PasswordRegisterEnabled = previousRegister, previousPasswordRegister
-		common.EmailVerificationEnabled = previousEmailVerification
-	})
+func TestPasswordRegistrationAlwaysRequiresAndConsumesEmailVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, username, email string
+		handler                     gin.HandlerFunc
+	}{
+		{"standard", "/api/user/register", "standard-user", "standard@example.com", Register},
+		{"distribution", "/api/dist/user/register", "distribution-user", "distribution@example.com", DistRegister},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupSecurityEnrollmentTest(t)
+			previousRegister, previousPasswordRegister := common.RegisterEnabled, common.PasswordRegisterEnabled
+			previousEmailVerification := common.EmailVerificationEnabled
+			common.RegisterEnabled, common.PasswordRegisterEnabled = true, true
+			common.EmailVerificationEnabled = false
+			t.Cleanup(func() {
+				common.RegisterEnabled, common.PasswordRegisterEnabled = previousRegister, previousPasswordRegister
+				common.EmailVerificationEnabled = previousEmailVerification
+			})
 
-	request := func(body string) *httptest.ResponseRecorder {
-		return securityEnrollmentRequest("POST", "/api/dist/user/register", body, "", service.AuthIdentity{}, DistRegister)
+			withoutCode := fmt.Sprintf(`{"username":%q,"email":%q,"password":"verified-password"}`, tc.username, tc.email)
+			response := securityEnrollmentRequest("POST", tc.path, withoutCode, "", service.AuthIdentity{}, tc.handler)
+			assert.Contains(t, response.Body.String(), `"success":false`)
+
+			common.RegisterVerificationCodeWithKey(tc.email, "123456", common.EmailVerificationPurpose)
+			withCode := fmt.Sprintf(`{"username":%q,"email":%q,"password":"verified-password","verification_code":"123456"}`, tc.username, tc.email)
+			response = securityEnrollmentRequest("POST", tc.path, withCode, "", service.AuthIdentity{}, tc.handler)
+			assert.Contains(t, response.Body.String(), `"success":true`)
+			assert.False(t, common.VerifyCodeWithKey(tc.email, "123456", common.EmailVerificationPurpose))
+
+			var user model.User
+			require.NoError(t, model.DB.Where("username = ?", tc.username).First(&user).Error)
+			assert.Equal(t, tc.email, user.Email)
+		})
 	}
-	withoutCode := request(`{"username":"verified-user","email":"verified@example.com","password":"verified-password"}`)
-	assert.Contains(t, withoutCode.Body.String(), `"success":false`)
-
-	common.RegisterVerificationCodeWithKey("verified@example.com", "123456", common.EmailVerificationPurpose)
-	withCode := request(`{"username":"verified-user","email":"verified@example.com","password":"verified-password","verification_code":"123456"}`)
-	assert.Contains(t, withCode.Body.String(), `"success":true`)
-	assert.False(t, common.VerifyCodeWithKey("verified@example.com", "123456", common.EmailVerificationPurpose))
-
-	var user model.User
-	require.NoError(t, model.DB.Where("username = ?", "verified-user").First(&user).Error)
-	assert.Equal(t, "verified@example.com", user.Email)
 }
 
 type boundLoginOAuthProvider struct {
