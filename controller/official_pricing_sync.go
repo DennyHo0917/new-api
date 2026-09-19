@@ -6,7 +6,6 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -369,13 +368,6 @@ func refreshUpstreamMediaPricing(ctx context.Context) error {
 		return err
 	}
 	for _, channel := range channels {
-		if channel.BaseURL == nil {
-			continue
-		}
-		parsed, err := url.Parse(*channel.BaseURL)
-		if err != nil || !strings.EqualFold(parsed.Hostname(), "apiroute.subrouter.ai") {
-			continue
-		}
 		settings := channel.GetOtherSettings()
 		for modelName := range prices {
 			if !common.StringsContains(channel.GetModels(), modelName) || settings.ModelMultipliers[modelName] == 1 {
