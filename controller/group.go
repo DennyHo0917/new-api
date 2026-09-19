@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -109,6 +110,117 @@ func UpdateGroupDisplayOrder(c *gin.Context) {
 	order := getGroupDisplayOrder()
 	recordManageAudit(c, "group.display_order.update", map[string]any{"order": order})
 	common.ApiSuccess(c, order)
+}
+
+func RenameGroup(c *gin.Context) {
+	var request struct {
+		OldName string  `json:"old_name"`
+		NewName string  `json:"new_name"`
+		Ratio   float64 `json:"ratio"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid group rename"})
+		return
+	}
+	request.OldName = strings.TrimSpace(request.OldName)
+	request.NewName = strings.TrimSpace(request.NewName)
+	if request.OldName == "" || request.NewName == "" || request.OldName == "default" || request.OldName == request.NewName || len(request.NewName) > 64 || request.Ratio < 0 || math.IsNaN(request.Ratio) || math.IsInf(request.Ratio, 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid group rename"})
+		return
+	}
+
+	ratios := ratio_setting.GetGroupRatioCopy()
+	if _, exists := ratios[request.OldName]; !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "group does not exist"})
+		return
+	}
+	if _, exists := ratios[request.NewName]; exists {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "group already exists"})
+		return
+	}
+	delete(ratios, request.OldName)
+	ratios[request.NewName] = request.Ratio
+
+	renameList := func(values []string) []string {
+		result := make([]string, 0, len(values))
+		seen := make(map[string]bool, len(values))
+		for _, value := range values {
+			if value == request.OldName {
+				value = request.NewName
+			}
+			if value != "" && !seen[value] {
+				seen[value] = true
+				result = append(result, value)
+			}
+		}
+		return result
+	}
+
+	order := renameList(getGroupDisplayOrder())
+	var groupGroupRatios map[string]map[string]float64
+	if err := common.UnmarshalJsonStr(ratio_setting.GroupGroupRatio2JSONString(), &groupGroupRatios); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if values, exists := groupGroupRatios[request.OldName]; exists {
+		delete(groupGroupRatios, request.OldName)
+		groupGroupRatios[request.NewName] = values
+	}
+	for _, values := range groupGroupRatios {
+		if ratio, exists := values[request.OldName]; exists {
+			delete(values, request.OldName)
+			values[request.NewName] = ratio
+		}
+	}
+	usableGroups := setting.GetUserUsableGroupsCopy()
+	if description, exists := usableGroups[request.OldName]; exists {
+		delete(usableGroups, request.OldName)
+		usableGroups[request.NewName] = description
+	}
+	autoGroups := renameList(setting.GetAutoGroups())
+	var topupRatios map[string]float64
+	if err := common.UnmarshalJsonStr(common.TopupGroupRatio2JSONString(), &topupRatios); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if ratio, exists := topupRatios[request.OldName]; exists {
+		delete(topupRatios, request.OldName)
+		topupRatios[request.NewName] = ratio
+	}
+	var rateLimits map[string][2]int
+	if err := common.UnmarshalJsonStr(setting.ModelRequestRateLimitGroup2JSONString(), &rateLimits); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if limits, exists := rateLimits[request.OldName]; exists {
+		delete(rateLimits, request.OldName)
+		rateLimits[request.NewName] = limits
+	}
+
+	values := map[string]any{
+		"GroupRatio":                 ratios,
+		groupDisplayOrderOption:      order,
+		"GroupGroupRatio":            groupGroupRatios,
+		"UserUsableGroups":           usableGroups,
+		"AutoGroups":                 autoGroups,
+		"TopupGroupRatio":            topupRatios,
+		"ModelRequestRateLimitGroup": rateLimits,
+	}
+	options := make(map[string]string, len(values))
+	for key, value := range values {
+		raw, err := common.Marshal(value)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		options[key] = string(raw)
+	}
+	if err := model.RenameRoutingGroup(request.OldName, request.NewName, options); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "group.rename", map[string]any{"old_name": request.OldName, "new_name": request.NewName})
+	common.ApiSuccess(c, gin.H{"ratios": ratios, "order": order})
 }
 
 func GetUserGroups(c *gin.Context) {

@@ -351,6 +351,7 @@ func SetApiRouter(router *gin.Engine) {
 			groupRoute.PUT("/ratios", controller.UpdateGroupRatios)
 			groupRoute.GET("/display-order", controller.GetGroupDisplayOrder)
 			groupRoute.PUT("/display-order", controller.UpdateGroupDisplayOrder)
+			groupRoute.PUT("/rename", controller.RenameGroup)
 		}
 
 		prefillGroupRoute := apiRouter.Group("/prefill_group")
