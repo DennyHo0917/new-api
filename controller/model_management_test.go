@@ -45,6 +45,7 @@ func modelManagementDB(t *testing.T, kind, dsn string) *gorm.DB {
 	}{
 		{ratio_setting.ModelPrice2JSONString(), ratio_setting.UpdateModelPriceByJSONString},
 		{ratio_setting.ModelRatio2JSONString(), ratio_setting.UpdateModelRatioByJSONString},
+		{ratio_setting.ModelMultiplier2JSONString(), ratio_setting.UpdateModelMultiplierByJSONString},
 		{ratio_setting.CompletionRatio2JSONString(), ratio_setting.UpdateCompletionRatioByJSONString},
 		{ratio_setting.CacheRatio2JSONString(), ratio_setting.UpdateCacheRatioByJSONString},
 		{ratio_setting.CreateCacheRatio2JSONString(), ratio_setting.UpdateCreateCacheRatioByJSONString},

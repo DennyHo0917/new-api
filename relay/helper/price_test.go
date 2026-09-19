@@ -116,9 +116,12 @@ func TestManualModelPriceOverridesGroupRatio(t *testing.T) {
 		return nil
 	}))
 	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	previousMultipliers := ratio_setting.ModelMultiplier2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelMultiplierByJSONString(previousMultipliers)) })
+	require.NoError(t, ratio_setting.UpdateModelMultiplierByJSONString(`{"manual-price":1.05}`))
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 		"billing_setting.billing_mode":    `{"manual-price":"tiered_expr"}`,
-		"billing_setting.billing_expr":    `{"manual-price":"tier(\"manual\", p * 2 + c * 8)"}`,
+		"billing_setting.billing_expr":    `{"manual-price":"tier(\"base\", p * 2 + c * 8)"}`,
 		"group_ratio_setting.group_ratio": `{"discount":0.4}`,
 	}))
 
@@ -127,9 +130,9 @@ func TestManualModelPriceOverridesGroupRatio(t *testing.T) {
 	info := &relaycommon.RelayInfo{OriginModelName: "manual-price", UserGroup: "discount", UsingGroup: "discount"}
 	price, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 100})
 	require.NoError(t, err)
-	assert.Equal(t, float64(1), price.GroupRatioInfo.GroupRatio)
+	assert.Equal(t, 1.05, price.GroupRatioInfo.GroupRatio)
 	require.NotNil(t, info.TieredBillingSnapshot)
-	assert.Equal(t, float64(1), info.TieredBillingSnapshot.GroupRatio)
+	assert.Equal(t, 1.05, info.TieredBillingSnapshot.GroupRatio)
 }
 
 func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {

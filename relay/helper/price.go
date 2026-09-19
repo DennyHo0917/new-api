@@ -70,6 +70,11 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		// normal group ratio
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	}
+	if multiplier, ok := ratio_setting.GetModelMultiplier(relayInfo.GetBillingModelName()); ok {
+		groupRatioInfo.GroupRatio = multiplier
+		groupRatioInfo.GroupSpecialRatio = 0
+		groupRatioInfo.HasSpecialRatio = false
+	}
 
 	return groupRatioInfo
 }
@@ -84,12 +89,6 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
-	if expression, ok := billing_setting.GetBillingExpr(billingModelName); ok && billing_setting.IsManualBillingExpr(expression) {
-		groupRatioInfo.GroupRatio = 1
-		groupRatioInfo.GroupSpecialRatio = 0
-		groupRatioInfo.HasSpecialRatio = false
-	}
-
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
 		return modelPriceHelperTiered(c, info, billingModelName, promptTokens, meta, groupRatioInfo)

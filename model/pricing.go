@@ -36,6 +36,7 @@ type Pricing struct {
 	QuotaType              int                                  `json:"quota_type"`
 	ModelRatio             float64                              `json:"model_ratio"`
 	ModelPrice             float64                              `json:"model_price"`
+	ModelMultiplier        *float64                             `json:"model_multiplier,omitempty"`
 	OwnerBy                string                               `json:"owner_by"`
 	CompletionRatio        float64                              `json:"completion_ratio"`
 	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`
@@ -387,6 +388,9 @@ func updatePricing() {
 					pricing.BillingExpr = expr
 				}
 			}
+		}
+		if multiplier, ok := ratio_setting.GetModelMultiplier(model); ok {
+			pricing.ModelMultiplier = &multiplier
 		}
 		usageModel := model
 		plugin, ok := pluginGeneration.GetByModel(model)

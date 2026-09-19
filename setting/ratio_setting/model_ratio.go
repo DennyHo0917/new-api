@@ -323,6 +323,7 @@ var defaultAudioCompletionRatio = map[string]float64{
 
 var modelPriceMap = types.NewRWMap[string, float64]()
 var modelRatioMap = types.NewRWMap[string, float64]()
+var modelMultiplierMap = types.NewRWMap[string, float64]()
 var completionRatioMap = types.NewRWMap[string, float64]()
 
 var defaultCompletionRatio = map[string]float64{
@@ -372,6 +373,18 @@ func GetModelPrice(name string, printErr bool) (float64, bool) {
 
 func UpdateModelRatioByJSONString(jsonStr string) error {
 	return types.LoadFromJsonStringWithCallback(modelRatioMap, jsonStr, InvalidateExposedDataCache)
+}
+
+func ModelMultiplier2JSONString() string {
+	return modelMultiplierMap.MarshalJSONString()
+}
+
+func UpdateModelMultiplierByJSONString(jsonStr string) error {
+	return types.LoadFromJsonStringWithCallback(modelMultiplierMap, jsonStr, InvalidateExposedDataCache)
+}
+
+func GetModelMultiplier(name string) (float64, bool) {
+	return modelMultiplierMap.Get(FormatMatchingModelName(name))
 }
 
 // 处理带有思考预算的模型名称，方便统一定价
