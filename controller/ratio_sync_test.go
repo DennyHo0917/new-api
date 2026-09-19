@@ -44,6 +44,26 @@ func TestPricingSyncExpressionPriority(t *testing.T) {
 	}
 }
 
+func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"billing_mode":{"deepseek-v4-pro":"tiered_expr","plain":"tiered_expr"},"billing_expr":{"deepseek-v4-pro":"weekday(\"UTC\") > 0 ? tier(\"peak\", p * 1.32 + cr * 0.044 + c * 3.96) : tier(\"off_peak\", p * 0.66 + cr * 0.022 + c * 1.98)","plain":"tier(\"standard\", p * 2 + c * 8)"}}}`))
+	}))
+	defer server.Close()
+
+	previousURL, previousClient := officialPricingURL, officialPricingClient
+	officialPricingURL, officialPricingClient = server.URL, server.Client()
+	t.Cleanup(func() {
+		officialPricingURL, officialPricingClient = previousURL, previousClient
+	})
+
+	modes, expressions, err := loadOfficialPeakPricing(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["deepseek-v4-pro-0813"])
+	assert.Equal(t, `tier("peak", p * 1.32 + cr * 0.044 + c * 3.96)`, expressions["deepseek-v4-pro"])
+	assert.Equal(t, expressions["deepseek-v4-pro"], expressions["deepseek-v4-pro-0813"])
+	assert.Equal(t, `tier("standard", p * 2 + c * 8)`, expressions["plain"])
+}
+
 func TestRatioConfigExportsEffectiveExpressions(t *testing.T) {
 	before := config.GlobalConfig.ExportAllConfigs()
 	expose := ratio_setting.IsExposeRatioEnabled()

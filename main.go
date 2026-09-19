@@ -138,6 +138,9 @@ func main() {
 	// Refresh fiat exchange rates once per day for payment settlement.
 	service.StartExchangeRateRefreshTask()
 
+	// Refresh first-party peak model prices once per day for billing and display.
+	controller.StartOfficialPricingRefreshTask()
+
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartSystemInstanceReporter()
