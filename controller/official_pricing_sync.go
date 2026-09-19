@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -77,7 +78,7 @@ func peakBillingExpression(expression string) string {
 	return expression
 }
 
-func loadOfficialPeakPricing(ctx context.Context) (map[string]string, map[string]string, error) {
+func loadOfficialPeakPricing(ctx context.Context, wanted map[string]bool) (map[string]string, map[string]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, officialPricingURL, nil)
 	if err != nil {
 		return nil, nil, err
@@ -100,9 +101,18 @@ func loadOfficialPeakPricing(ctx context.Context) (map[string]string, map[string
 
 	remoteModes := valueMap(payload.Data[billing_setting.BillingModeField])
 	remoteExpressions := valueMap(payload.Data[billing_setting.BillingExprField])
-	modes := make(map[string]string, len(remoteModes)+len(officialPricingAliases))
-	expressions := make(map[string]string, len(remoteExpressions)+len(officialPricingAliases))
+	wantedRemote := maps.Clone(wanted)
+	for alias, canonical := range officialPricingAliases {
+		if wanted[alias] {
+			wantedRemote[canonical] = true
+		}
+	}
+	modes := make(map[string]string, len(wanted))
+	expressions := make(map[string]string, len(wanted))
 	for name, rawMode := range remoteModes {
+		if !wantedRemote[name] {
+			continue
+		}
 		mode, ok := rawMode.(string)
 		if !ok || mode != billing_setting.BillingModeTieredExpr {
 			continue
@@ -120,7 +130,7 @@ func loadOfficialPeakPricing(ctx context.Context) (map[string]string, map[string
 		expressions[name] = expression
 	}
 	for alias, canonical := range officialPricingAliases {
-		if expression, ok := expressions[canonical]; ok {
+		if expression, ok := expressions[canonical]; ok && wanted[alias] {
 			modes[alias] = billing_setting.BillingModeTieredExpr
 			expressions[alias] = expression
 		}
@@ -132,32 +142,41 @@ func loadOfficialPeakPricing(ctx context.Context) (map[string]string, map[string
 }
 
 func refreshOfficialPricing(ctx context.Context) error {
-	modes, expressions, err := loadOfficialPeakPricing(ctx)
+	pricing := model.GetPricing()
+	names := make([]string, 0, len(pricing))
+	wanted := make(map[string]bool, len(pricing))
+	for _, item := range pricing {
+		names = append(names, item.ModelName)
+		wanted[item.ModelName] = true
+	}
+	modes, expressions, err := loadOfficialPeakPricing(ctx, wanted)
 	if err != nil {
 		return err
 	}
-	for name, mode := range billing_setting.GetBillingModeCopy() {
-		if _, exists := modes[name]; !exists {
-			modes[name] = mode
+	snapshot, err := model.GetModelPricingSnapshot(names)
+	if err != nil {
+		return err
+	}
+	changes := make([]model.ModelPricingChange, 0, len(expressions))
+	for _, entry := range snapshot.Entries {
+		expression, exists := expressions[entry.ModelName]
+		if !exists {
+			continue
 		}
-	}
-	for name, expression := range billing_setting.GetBillingExprCopy() {
-		if _, exists := expressions[name]; !exists {
-			expressions[name] = expression
+		draft := maps.Clone(entry.Configured)
+		if draft == nil {
+			draft = make(model.PricingValues)
 		}
+		draft[billing_setting.BillingModeField] = modes[entry.ModelName]
+		draft[billing_setting.BillingExprField] = expression
+		changes = append(changes, model.ModelPricingChange{
+			ModelName: entry.ModelName, ExpectedVersion: entry.Version, Pricing: draft,
+		})
 	}
-	encodedModes, err := common.Marshal(modes)
-	if err != nil {
-		return err
+	if len(changes) == 0 {
+		return nil
 	}
-	encodedExpressions, err := common.Marshal(expressions)
-	if err != nil {
-		return err
-	}
-	return model.UpdateModelPricingOptions(map[string]string{
-		"billing_setting.billing_mode": string(encodedModes),
-		"billing_setting.billing_expr": string(encodedExpressions),
-	})
+	return model.UpdateModelPricing(changes)
 }
 
 func StartOfficialPricingRefreshTask() {

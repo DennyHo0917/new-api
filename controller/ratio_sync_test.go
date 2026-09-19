@@ -56,7 +56,7 @@ func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
 		officialPricingURL, officialPricingClient = previousURL, previousClient
 	})
 
-	modes, expressions, err := loadOfficialPeakPricing(t.Context())
+	modes, expressions, err := loadOfficialPeakPricing(t.Context(), map[string]bool{"deepseek-v4-pro-0813": true, "plain": true})
 	require.NoError(t, err)
 	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["deepseek-v4-pro-0813"])
 	assert.Equal(t, `tier("peak", p * 1.32 + cr * 0.044 + c * 3.96)`, expressions["deepseek-v4-pro"])
