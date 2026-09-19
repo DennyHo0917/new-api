@@ -29,6 +29,9 @@ var officialPricingAliases = map[string]string{
 	"deepseek-v4-flash-0731": "deepseek-v4-flash",
 	"deepseek-v4.1-flash":    "deepseek-flash",
 	"deepseek-v4-pro-0813":   "deepseek-v4-pro",
+	"nano-banana":            "gemini-2.5-flash-image",
+	"nano-banana-pro":        "gemini-3-pro-image",
+	"nano-banana-2":          "gemini-3.1-flash-image",
 }
 
 // peakBillingExpression replaces a generated peak/off-peak schedule with its
