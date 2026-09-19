@@ -78,6 +78,13 @@ func GetBillingExpr(model string) (string, bool) {
 	return "", false
 }
 
+// IsManualBillingExpr marks an administrator-defined absolute model price.
+// Manual prices are complete billing contracts and therefore do not inherit a
+// channel-group multiplier or the daily official-price refresh.
+func IsManualBillingExpr(expression string) bool {
+	return strings.HasPrefix(strings.TrimSpace(expression), `tier("manual",`)
+}
+
 func GetBuiltinBillingExpr(model string) (string, bool) {
 	expression, ok := builtinBillingExpr[model]
 	return expression, ok

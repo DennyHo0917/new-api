@@ -159,6 +159,10 @@ func refreshOfficialPricing(ctx context.Context) error {
 	}
 	changes := make([]model.ModelPricingChange, 0, len(expressions))
 	for _, entry := range snapshot.Entries {
+		configuredExpression, _ := entry.Configured[billing_setting.BillingExprField].(string)
+		if billing_setting.IsManualBillingExpr(configuredExpression) {
+			continue
+		}
 		expression, exists := expressions[entry.ModelName]
 		if !exists {
 			continue

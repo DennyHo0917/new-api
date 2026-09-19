@@ -84,6 +84,11 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if expression, ok := billing_setting.GetBillingExpr(billingModelName); ok && billing_setting.IsManualBillingExpr(expression) {
+		groupRatioInfo.GroupRatio = 1
+		groupRatioInfo.GroupSpecialRatio = 0
+		groupRatioInfo.HasSpecialRatio = false
+	}
 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
