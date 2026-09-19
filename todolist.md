@@ -14,6 +14,7 @@
 - [x] 分站注册强制邮箱验证码，第三方 OAuth 免验证；验证码限时、成功注册后失效，并对发送与登录/注册限流
 - [x] 后端通过 Resend API 发送验证码，不向浏览器暴露邮件服务密钥（VPS 使用 `RESEND_API_KEY`，并保留 HTTP 邮件网关与 SMTP 回退）
 - [x] 补齐回归测试并完成前后端构建验证（Go 定向测试、`go build ./...`、前端 `bun run build` 与认证检查通过）
+- [x] 封堵通用 `/api/user/register` 绕过：所有密码注册入口无条件要求邮箱验证码，第三方 OAuth 注册不受影响；生产全局邮箱验证已启用，未上线阶段产生的 15 个零余额脚本账号已备份并清理。验证码继续保持限时、单次使用并受发送/注册限流保护；依据 OWASP ASVS v5.0.0-6.3.8、Authentication 与 Email Validation and Verification Cheat Sheets（2026-09-19）
 
 ## 2026-09-17 前端接管清理与管理闭环
 
