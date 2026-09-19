@@ -48,6 +48,7 @@ func TestPricingCarriesTaskUsageSchemaAndRefreshesWithPluginGeneration(t *testin
 	initialPricing := pricingByModel(GetPricing())
 	require.Contains(t, initialPricing, "pricing-usage-model")
 	require.Contains(t, initialPricing, "ordinary-model")
+	assert.False(t, initialPricing["ordinary-model"].PricingConfigured)
 	assert.Equal(t, "second", initialPricing["pricing-usage-model"].BillingUsageSchema["seconds"].Unit)
 	assert.Equal(t, "Estimated duration.", initialPricing["pricing-usage-model"].BillingUsageSchema["seconds"].Description["en"])
 	assert.Equal(t, "生成视频", initialPricing["pricing-usage-model"].BillingUsageSchema["action"].EnumLabels["video"]["zh"])

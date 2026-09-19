@@ -28,6 +28,7 @@ type PricingPluginVariant struct {
 type Pricing struct {
 	BillingPluginVariants  []PricingPluginVariant               `json:"billing_plugin_variants,omitempty"`
 	ModelName              string                               `json:"model_name"`
+	PricingConfigured      bool                                 `json:"pricing_configured"`
 	Description            string                               `json:"description,omitempty"`
 	Icon                   string                               `json:"icon,omitempty"`
 	Tags                   string                               `json:"tags,omitempty"`
@@ -348,11 +349,13 @@ func updatePricing() {
 		if findPrice {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
+			pricing.PricingConfigured = true
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
 			pricing.ModelRatio = modelRatio
 			pricing.CompletionRatio = ratio_setting.GetCompletionRatio(model)
 			pricing.QuotaType = 0
+			pricing.PricingConfigured = ratio_setting.HasConfiguredModelRatio(model)
 		}
 		if cacheRatio, ok := ratio_setting.GetCacheRatio(model); ok {
 			pricing.CacheRatio = &cacheRatio
@@ -375,6 +378,7 @@ func updatePricing() {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
+				pricing.PricingConfigured = true
 			}
 		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
 			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
