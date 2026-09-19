@@ -90,11 +90,15 @@ func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vend
 		// 匹配供应商
 		vendorID := 0
 		modelLower := strings.ToLower(modelName)
-		for _, pattern := range patterns {
-			vendorName := defaultVendorRules[pattern]
-			if strings.Contains(modelLower, pattern) {
-				vendorID = getDisplayVendor(vendorName, vendorMap)
-				break
+		if strings.HasPrefix(modelLower, "gpt-") {
+			vendorID = getDisplayVendor("OpenAI", vendorMap)
+		} else {
+			for _, pattern := range patterns {
+				vendorName := defaultVendorRules[pattern]
+				if strings.Contains(modelLower, pattern) {
+					vendorID = getDisplayVendor(vendorName, vendorMap)
+					break
+				}
 			}
 		}
 
