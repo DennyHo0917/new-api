@@ -170,8 +170,8 @@ func refreshOfficialPricing(ctx context.Context) error {
 		if draft == nil {
 			draft = make(model.PricingValues)
 		}
-		draft[billing_setting.BillingModeField] = modes[entry.ModelName]
-		draft[billing_setting.BillingExprField] = expression
+		draft["billing_setting.billing_mode"] = modes[entry.ModelName]
+		draft["billing_setting.billing_expr"] = expression
 		changes = append(changes, model.ModelPricingChange{
 			ModelName: entry.ModelName, ExpectedVersion: entry.Version, Pricing: draft,
 		})
