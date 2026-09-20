@@ -83,6 +83,7 @@ type User struct {
 	HasPassword          bool                       `json:"-" gorm:"-:all"`
 	OriginalPassword     string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
 	DisplayName          string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	AvatarUrl            string                     `json:"avatar_url" gorm:"type:varchar(2048);column:avatar_url" validate:"max=2048"`
 	Role                 int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
 	Status               int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email                string                     `json:"email" gorm:"index" validate:"max=50"`
@@ -581,7 +582,7 @@ func GetSelfUserById(id int) (*User, error) {
 		HasPassword bool `gorm:"column:has_password"`
 	}
 	err := DB.Model(&User{}).Select([]string{
-		"id", "username", "display_name", "role", "status", "email",
+		"id", "username", "display_name", "avatar_url", "role", "status", "email",
 		"github_id", "discord_id", "oidc_id", "wechat_id", "telegram_id",
 		"group", "quota", "used_quota", "request_count", "aff_code", "aff_count",
 		"aff_quota", "aff_history", "inviter_id", "linux_do_id", "setting",

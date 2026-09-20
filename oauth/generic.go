@@ -244,6 +244,12 @@ func (p *GenericOAuthProvider) GetUserInfo(ctx context.Context, token *OAuthToke
 	username := gjson.Get(bodyStr, p.config.UsernameField).String()
 	displayName := gjson.Get(bodyStr, p.config.DisplayNameField).String()
 	email := gjson.Get(bodyStr, p.config.EmailField).String()
+	avatarURL := ""
+	for _, field := range []string{"picture", "avatar_url", "data.profile_image_url"} {
+		if avatarURL = gjson.Get(bodyStr, field).String(); avatarURL != "" {
+			break
+		}
+	}
 
 	// If user ID field returns a number, convert it
 	if userId == "" {
@@ -285,6 +291,7 @@ func (p *GenericOAuthProvider) GetUserInfo(ctx context.Context, token *OAuthToke
 		Username:       username,
 		DisplayName:    displayName,
 		Email:          email,
+		AvatarURL:      avatarURL,
 		Extra: map[string]any{
 			"provider": p.config.Slug,
 		},

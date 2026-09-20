@@ -958,6 +958,31 @@ func TestOAuthLoginEmailCollisionOffersSecureAccountLinking(t *testing.T) {
 	assert.NotContains(t, response.Body.String(), "existing@example.com")
 }
 
+func TestOAuthAvatarURLValidationAndPersistence(t *testing.T) {
+	provider := setupAuthFlowControllerTest(t)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	user, err := findOrCreateOAuthUser(c, provider, &oauth.OAuthUser{
+		ProviderUserID: "avatar-user",
+		Username:       "avatar-user",
+		AvatarURL:      "https://lh3.googleusercontent.com/avatar/photo.jpg",
+	}, "")
+	require.NoError(t, err)
+	assert.Equal(t, "https://lh3.googleusercontent.com/avatar/photo.jpg", user.AvatarUrl)
+	stored, err := model.GetUserById(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, user.AvatarUrl, stored.AvatarUrl)
+	assert.Equal(t, user.AvatarUrl, buildSelfUserData(stored)["avatar_url"])
+
+	for _, invalid := range []string{
+		"http://example.com/avatar.png",
+		"javascript:alert(1)",
+		"data:image/svg+xml,<svg/>",
+		"https://user:password@example.com/avatar.png",
+	} {
+		assert.Empty(t, normalizeOAuthAvatarURL(invalid), invalid)
+	}
+}
+
 func TestOAuthBindProviderErrorConsumesSessionBoundFlow(t *testing.T) {
 	_, identity := setupSecurityEnrollmentTest(t)
 	provider := &authFlowTestOAuthProvider{}

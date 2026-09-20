@@ -170,6 +170,7 @@ func (p *TelegramProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (
 		ID       json.Number `json:"id"`
 		Name     string      `json:"name"`
 		Username string      `json:"preferred_username"`
+		Picture  string      `json:"picture"`
 	}
 	if err := common.Unmarshal(rawClaims, &claims); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrTelegramOAuthFailed, err)
@@ -180,7 +181,7 @@ func (p *TelegramProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (
 	}
 	return &OAuthUser{
 		ProviderUserID: strconv.FormatUint(id, 10),
-		Username:       claims.Username, DisplayName: claims.Name,
+		Username:       claims.Username, DisplayName: claims.Name, AvatarURL: claims.Picture,
 	}, nil
 }
 

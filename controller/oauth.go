@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -409,6 +410,9 @@ func handleOAuthBind(c *gin.Context, providerName string, provider oauth.Provide
 		return false, false
 	}
 	_, err = model.ConsumeAuthFlowWithAction(state, match, func(tx *gorm.DB, _ *model.AuthFlow) error {
+		if err := persistOAuthAvatar(tx, &model.User{Id: identity.UserID}, oauthUser.AvatarURL); err != nil {
+			common.SysError(fmt.Sprintf("[OAuth] Failed to update user %d avatar: %s", identity.UserID, err.Error()))
+		}
 		if providerName == "telegram" {
 			return model.BindTelegramForSessionWithTx(tx, identity, oauthUser.ProviderUserID)
 		}
@@ -439,7 +443,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, oauth.ErrTelegramAccountNotBound
 		}
-		return user, err
+		if err != nil {
+			return nil, err
+		}
+		if err := persistOAuthAvatar(model.DB, user, oauthUser.AvatarURL); err != nil {
+			common.SysError(fmt.Sprintf("[OAuth] Failed to update user %d avatar: %s", user.Id, err.Error()))
+		}
+		return user, nil
 	}
 
 	// Check if user already exists with new ID
@@ -451,6 +461,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Check if user has been deleted
 		if user.Id == 0 {
 			return nil, &OAuthUserDeletedError{}
+		}
+		if err := persistOAuthAvatar(model.DB, user, oauthUser.AvatarURL); err != nil {
+			common.SysError(fmt.Sprintf("[OAuth] Failed to update user %d avatar: %s", user.Id, err.Error()))
 		}
 		return user, nil
 	}
@@ -469,6 +482,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 				if err := user.UpdateGitHubId(oauthUser.ProviderUserID); err != nil {
 					common.SysError(fmt.Sprintf("[OAuth] Failed to migrate user %d: %s", user.Id, err.Error()))
 					// Continue with login even if migration fails
+				}
+				if err := persistOAuthAvatar(model.DB, user, oauthUser.AvatarURL); err != nil {
+					common.SysError(fmt.Sprintf("[OAuth] Failed to update user %d avatar: %s", user.Id, err.Error()))
 				}
 				return user, nil
 			}
@@ -508,6 +524,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 			return nil, err
 		}
 	}
+	user.AvatarUrl = normalizeOAuthAvatarURL(oauthUser.AvatarURL)
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
 
@@ -576,6 +593,30 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 
 	return user, nil
+}
+
+func normalizeOAuthAvatarURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 2048 {
+		return ""
+	}
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.String()
+}
+
+func persistOAuthAvatar(tx *gorm.DB, user *model.User, raw string) error {
+	avatarURL := normalizeOAuthAvatarURL(raw)
+	if avatarURL == "" || user.AvatarUrl == avatarURL {
+		return nil
+	}
+	if err := tx.Model(&model.User{}).Where("id = ?", user.Id).Update("avatar_url", avatarURL).Error; err != nil {
+		return err
+	}
+	user.AvatarUrl = avatarURL
+	return nil
 }
 
 // Error types for OAuth

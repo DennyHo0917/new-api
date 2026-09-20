@@ -199,7 +199,7 @@ func environmentProviderConfig(config *model.CustomOAuthProvider) *model.CustomO
 		copy.ClientSecret = clientSecret
 		copy.AuthorizationEndpoint = "https://x.com/i/oauth2/authorize"
 		copy.TokenEndpoint = "https://api.x.com/2/oauth2/token"
-		copy.UserInfoEndpoint = "https://api.x.com/2/users/me?user.fields=id,name,username"
+		copy.UserInfoEndpoint = "https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url"
 		copy.Scopes = "tweet.read users.read"
 		copy.UserIdField = "data.id"
 		copy.UsernameField = "data.username"

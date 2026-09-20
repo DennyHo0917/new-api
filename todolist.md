@@ -2,6 +2,7 @@
 
 ## 2026-09-20 切流前运行安全加固
 
+- [x] 用户头像统一展示：Google、GitHub、X、Discord、OIDC、Telegram、Linux DO 及自定义 OAuth 在提供头像时保存公开 HTTPS 地址，既有第三方用户下次登录或绑定时自动补齐；右上角优先显示第三方头像，地址缺失或加载失败时回退到显示名称、用户名或邮箱首字母。拒绝非 HTTPS、含凭据或超过 2048 字符的头像地址，头像保存失败不阻断登录。OAuth/model/controller 全量测试、后端构建与前端生产构建通过（2026-09-20）。
 - [x] 修复旧站密码校验成功后 API Key 同步失败：回源的用户信息和 Key 请求带上旧站要求的 `New-Api-User` 身份头，不放宽密码校验或本地账户防覆盖规则。回归测试会拒绝缺失/错误身份头的 Key 同步；service 定向及全量测试、controller 编译和 `go build ./...` 通过（2026-09-20）。
 - [x] 修复真实旧站登录响应未必携带用户 ID 时的迁移失败：登录成功后复用认证 Session 查询旧站 `/api/dist/user/self` 或 `/api/user/self` 补全用户信息；预同步占位记录在上游仍不返回 ID 时使用已核对的 `subrouter_id`，新用户则仍必须获得有效 ID。回源失败日志仅记录 `upstream_auth_failed` / `not_eligible` / `token_sync_failed` 等分类，不记录密码或 Session。已覆盖嵌套/平铺登录响应、用户信息回退、占位 ID 回退、Key 失败回滚及本地账户防覆盖；SQLite、PostgreSQL 15.19 隔离库、service 全量回归与 `go build ./...` 通过，临时库和角色已删除（2026-09-20）。
 - [x] 根治切流后旧站用户首次登录：新站尚无本地记录时，仅在 SubRouter 凭据验证成功、返回有效旧站用户 ID 且历史 Key 抓取成功后，事务性创建 Quota=0 的本地账户并导入 Key；失败不留半迁移账户，已有本地账户不得被回源覆盖，预同步占位还会校验旧站 ID 一致。已覆盖错误凭据、Key 抓取失败回滚、重复迁移与本地账户防覆盖；SQLite 定向与 service 全量回归、PostgreSQL 15.19 隔离库实库回归、controller 编译及 `go build ./...` 通过，临时库与角色已删除。保留统一登录失败响应与现有限流，依据 OWASP ASVS 5.0.0 V6/V7 及 Authentication / Session Management Cheat Sheets。后端 `75d300e42` 已推送并部署，生产容器 healthy、重启数 0（2026-09-20）。

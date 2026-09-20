@@ -387,6 +387,7 @@ func DistGetUserSelf(c *gin.Context) {
 			"id":                      user.Id,
 			"username":                user.Username,
 			"display_name":            user.DisplayName,
+			"avatar_url":              user.AvatarUrl,
 			"email":                   user.Email,
 			"role":                    user.Role,
 			"status":                  user.Status,
