@@ -46,7 +46,7 @@ func TestPricingSyncExpressionPriority(t *testing.T) {
 
 func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":{"billing_mode":{"deepseek-v4-pro":"tiered_expr","plain":"tiered_expr"},"billing_expr":{"deepseek-v4-pro":"weekday(\"UTC\") > 0 ? tier(\"peak\", p * 1.32 + cr * 0.044 + c * 3.96) : tier(\"off_peak\", p * 0.66 + cr * 0.022 + c * 1.98)","plain":"tier(\"standard\", p * 2 + c * 8)"}}}`))
+		_, _ = w.Write([]byte(`{"data":{"billing_mode":{"deepseek-v4-pro":"tiered_expr","plain":"tiered_expr","hy3":"tiered_expr"},"billing_expr":{"deepseek-v4-pro":"weekday(\"UTC\") > 0 ? tier(\"peak\", p * 1.32 + cr * 0.044 + c * 3.96) : tier(\"off_peak\", p * 0.66 + cr * 0.022 + c * 1.98)","plain":"tier(\"standard\", p * 2 + c * 8)","hy3":"tier(\"standard\", p * 0 + cr * 0 + cc * 0 + c * 0)"}}}`))
 	}))
 	defer server.Close()
 
@@ -56,12 +56,14 @@ func TestLoadOfficialPeakPricingUsesPeakTierAndAliases(t *testing.T) {
 		officialPricingURL, officialPricingClient = previousURL, previousClient
 	})
 
-	modes, expressions, err := loadOfficialPeakPricing(t.Context(), map[string]bool{"deepseek-v4-pro-0813": true, "plain": true})
+	modes, expressions, err := loadOfficialPeakPricing(t.Context(), map[string]bool{"deepseek-v4-pro-0813": true, "plain": true, "hy3": true})
 	require.NoError(t, err)
 	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["deepseek-v4-pro-0813"])
 	assert.Equal(t, `tier("peak", p * 1.32 + cr * 0.044 + c * 3.96)`, expressions["deepseek-v4-pro"])
 	assert.Equal(t, expressions["deepseek-v4-pro"], expressions["deepseek-v4-pro-0813"])
 	assert.Equal(t, `tier("standard", p * 2 + c * 8)`, expressions["plain"])
+	assert.Equal(t, billing_setting.BillingModeTieredExpr, modes["hy3"])
+	assert.Equal(t, officialPricingOverrides["hy3"], expressions["hy3"])
 }
 
 func TestLoadUpstreamMediaPricingCopiesPricesWithMarkup(t *testing.T) {

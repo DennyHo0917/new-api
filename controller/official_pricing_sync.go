@@ -34,6 +34,12 @@ var officialPricingAliases = map[string]string{
 	"deepseek-v4-pro-0813":   "deepseek-v4-pro",
 }
 
+// The upstream metadata currently publishes hy3 as a zero-cost placeholder.
+// Keep the public Tencent TokenHub list price until that source is corrected.
+var officialPricingOverrides = map[string]string{
+	"hy3": `tier("standard", p * 0.15 + cr * 0.0375 + c * 0.60)`,
+}
+
 type upstreamMediaPrice struct {
 	ModelName       string   `json:"model_name"`
 	Category        string   `json:"category"`
@@ -231,6 +237,12 @@ func loadOfficialPeakPricing(ctx context.Context, wanted map[string]bool) (map[s
 		if expression, ok := expressions[canonical]; ok && wanted[alias] {
 			modes[alias] = billing_setting.BillingModeTieredExpr
 			expressions[alias] = expression
+		}
+	}
+	for name, expression := range officialPricingOverrides {
+		if wanted[name] {
+			modes[name] = billing_setting.BillingModeTieredExpr
+			expressions[name] = expression
 		}
 	}
 	if len(expressions) == 0 {
