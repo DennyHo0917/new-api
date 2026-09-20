@@ -140,12 +140,19 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		loginUser = *loginUser.User
 	}
 	if loginUser.Id <= 0 {
+		knownLegacyUserID := 0
+		if localUserExists {
+			knownLegacyUserID = migrationMarker.SubRouterID
+		}
 		for _, selfEndpoint := range []string{baseURL + "/api/dist/user/self", baseURL + "/api/user/self"} {
 			selfReq, err := http.NewRequest(http.MethodGet, selfEndpoint, nil)
 			if err != nil {
 				continue
 			}
 			selfReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
+			if knownLegacyUserID > 0 {
+				selfReq.Header.Set("New-Api-User", strconv.Itoa(knownLegacyUserID))
+			}
 			selfResp, err := client.Do(selfReq)
 			if err != nil {
 				continue
@@ -209,6 +216,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 			continue
 		}
 		tokenReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
+		tokenReq.Header.Set("New-Api-User", strconv.Itoa(loginUser.Id))
 
 		tokenResp, err := client.Do(tokenReq)
 		if err != nil {

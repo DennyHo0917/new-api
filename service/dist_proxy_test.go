@@ -198,6 +198,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	loginRequests := 0
 	selfRequests := 0
 	tokenRequests := 0
+	missingTokenIdentity := false
 
 	// Mock upstream SubRouter server for login and token list.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +257,16 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 			}
 			if cookie.Value != "upstream_sess_tok" && cookie.Value != "new_upstream_sess" {
 				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			expectedUserID := "88"
+			if cookie.Value == "new_upstream_sess" {
+				expectedUserID = "92"
+			}
+			if r.Header.Get("New-Api-User") != expectedUserID {
+				missingTokenIdentity = true
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false}`))
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -329,6 +340,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, "subrouter", token.Group, "Migrated token must have group tagged as subrouter")
 	assert.Equal(t, 3, loginRequests)
 	assert.Equal(t, 1, tokenRequests)
+	assert.False(t, missingTokenIdentity)
 
 	// Once the password is present, another migration attempt cannot call or overwrite upstream.
 	_, err = AuthenticateAndMigrateSubRouterUser("valid_old_user", "replacement_password_123")
@@ -360,6 +372,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, newUser.Id, newToken.UserId)
 	assert.Equal(t, model.LegacySubRouterGroup, newToken.Group)
 	assert.Equal(t, 3, selfRequests)
+	assert.False(t, missingTokenIdentity)
 
 	// Token synchronization failure rolls back on-demand account creation.
 	_, err = AuthenticateAndMigrateSubRouterUser("new_token_failure_user", "secret_pass_123")
