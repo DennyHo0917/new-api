@@ -88,35 +88,41 @@ func GetSubRouterReverseProxy() *httputil.ReverseProxy {
 			req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
 		}
 
-		// Intercept 429 Insufficient Quota errors from SubRouter
+		// Intercept only explicit quota-exhaustion responses. A generic 429 can
+		// be temporary rate limiting and must not switch a legacy key to local quota.
 		proxy.ModifyResponse = func(resp *http.Response) error {
 			var legacyQuotaExhausted *bool
 			if resp.Request != nil {
 				legacyQuotaExhausted, _ = resp.Request.Context().Value(legacyQuotaMarkerKey{}).(*bool)
 			}
-			// SubRouter returns 429 Too Many Requests or 402 Payment Required on quota exhaustion
-			if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusPaymentRequired {
-				if legacyQuotaExhausted != nil {
-					*legacyQuotaExhausted = true
-				}
-				_ = resp.Body.Close()
-				errPayload := fmt.Sprintf(`{"error":{"message":"%s","type":"insufficient_quota","param":"","code":"insufficient_user_quota"}}`, QuotaExhaustedMessage)
-				resp.StatusCode = http.StatusTooManyRequests
-				resp.Status = "429 Too Many Requests"
-				resp.Header.Set("Content-Type", "application/json; charset=utf-8")
-				resp.Header.Del("Content-Encoding")
-				resp.ContentLength = int64(len(errPayload))
-				resp.Header.Set("Content-Length", strconv.Itoa(len(errPayload)))
-				resp.Body = io.NopCloser(strings.NewReader(errPayload))
-				return nil
-			}
-
-			// SubRouter sometimes returns 400 or 403 with quota error message
-			if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden {
+			if resp.StatusCode == http.StatusBadRequest ||
+				resp.StatusCode == http.StatusPaymentRequired ||
+				resp.StatusCode == http.StatusForbidden ||
+				resp.StatusCode == http.StatusTooManyRequests {
 				bodyBytes, err := io.ReadAll(resp.Body)
 				if err == nil {
 					bodyStr := strings.ToLower(string(bodyBytes))
-					if strings.Contains(bodyStr, "quota") || strings.Contains(bodyStr, "额度") || strings.Contains(bodyStr, "balance") {
+					quotaExhausted := false
+					for _, marker := range []string{
+						"insufficient_user_quota",
+						"insufficient_quota",
+						"insufficient user quota",
+						"user quota not enough",
+						"quota not enough",
+						"quota exhausted",
+						"exceeded your current quota",
+						"insufficient balance",
+						"balance not enough",
+						"额度不足",
+						"额度已耗尽",
+						"余额不足",
+					} {
+						if strings.Contains(bodyStr, marker) {
+							quotaExhausted = true
+							break
+						}
+					}
+					if quotaExhausted {
 						if legacyQuotaExhausted != nil {
 							*legacyQuotaExhausted = true
 						}

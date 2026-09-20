@@ -37,6 +37,11 @@ func TestDistDualTrackGateway(t *testing.T) {
 	// Mock upstream SubRouter server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("X-Test-Upstream") == "rate-limit" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"too many requests","code":"rate_limit_exceeded"}}`))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"origin":"subrouter_upstream"}`))
 	}))
@@ -136,4 +141,15 @@ func TestDistDualTrackGateway(t *testing.T) {
 	router.ServeHTTP(recC, reqC)
 	assert.Equal(t, http.StatusOK, recC.Code)
 	assert.Contains(t, recC.Body.String(), "subrouter_upstream", "Migrated key with 0 quota must proxy to SubRouter")
+
+	// Case D: Temporary upstream rate limiting must not mark the old balance exhausted.
+	reqD := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	reqD.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
+	reqD.Header.Set("X-Test-Upstream", "rate-limit")
+	recD := newDistRecorder()
+	router.ServeHTTP(recD, reqD)
+	assert.Equal(t, http.StatusTooManyRequests, recD.Code)
+	assert.Contains(t, recD.Body.String(), "rate_limit_exceeded")
+	require.NoError(t, model.DB.First(&migratedToken, migratedToken.Id).Error)
+	assert.Equal(t, model.LegacySubRouterGroup, migratedToken.Group)
 }

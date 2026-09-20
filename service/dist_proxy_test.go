@@ -54,6 +54,14 @@ func TestSubRouterReverseProxy_QuotaInterception(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":{"message":"user quota not enough to complete request"}}`))
+		case "/v1/rate-limited":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"too many requests","type":"rate_limit_error","code":"rate_limit_exceeded"}}`))
+		case "/v1/payment-required":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"payment method required","code":"payment_required"}}`))
 		case "/v1/models":
 			// Normal 200 OK
 			w.Header().Set("Content-Type", "application/json")
@@ -81,6 +89,14 @@ func TestSubRouterReverseProxy_QuotaInterception(t *testing.T) {
 	router.POST("/v1/embeddings", func(c *gin.Context) {
 		ProxyToSubRouter(c)
 	})
+	var rateLimitedExhausted bool
+	router.POST("/v1/rate-limited", func(c *gin.Context) {
+		rateLimitedExhausted = ProxyToSubRouter(c)
+	})
+	var paymentRequiredExhausted bool
+	router.POST("/v1/payment-required", func(c *gin.Context) {
+		paymentRequiredExhausted = ProxyToSubRouter(c)
+	})
 	router.GET("/v1/models", func(c *gin.Context) {
 		ProxyToSubRouter(c)
 	})
@@ -101,7 +117,25 @@ func TestSubRouterReverseProxy_QuotaInterception(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, rec403.Code)
 	assert.Contains(t, rec403.Body.String(), QuotaExhaustedMessage)
 
-	// 3. Test normal 200 pass-through without interference
+	// 3. Generic rate limiting and payment errors must pass through without
+	// marking the legacy key exhausted.
+	reqRateLimited := httptest.NewRequest(http.MethodPost, "/v1/rate-limited", strings.NewReader(`{}`))
+	recRateLimited := newCloseNotifyingRecorder()
+	router.ServeHTTP(recRateLimited, reqRateLimited)
+	assert.Equal(t, http.StatusTooManyRequests, recRateLimited.Code)
+	assert.Contains(t, recRateLimited.Body.String(), "rate_limit_exceeded")
+	assert.NotContains(t, recRateLimited.Body.String(), QuotaExhaustedMessage)
+	assert.False(t, rateLimitedExhausted)
+
+	reqPaymentRequired := httptest.NewRequest(http.MethodPost, "/v1/payment-required", strings.NewReader(`{}`))
+	recPaymentRequired := newCloseNotifyingRecorder()
+	router.ServeHTTP(recPaymentRequired, reqPaymentRequired)
+	assert.Equal(t, http.StatusPaymentRequired, recPaymentRequired.Code)
+	assert.Contains(t, recPaymentRequired.Body.String(), "payment_required")
+	assert.NotContains(t, recPaymentRequired.Body.String(), QuotaExhaustedMessage)
+	assert.False(t, paymentRequiredExhausted)
+
+	// 4. Test normal 200 pass-through without interference
 	req200 := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	rec200 := newCloseNotifyingRecorder()
 	router.ServeHTTP(rec200, req200)
