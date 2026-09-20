@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -233,6 +234,58 @@ func GetCryptoOrderStatus(c *gin.Context) {
 			"wallet":             order.WalletAddress,
 			"payment_expired_at": order.ExpiredAt - int64((operation_setting.CryptoOrderExpiryMinutes-operation_setting.CryptoPaymentWindowMinutes)*60),
 			"expired_at":         order.ExpiredAt,
+		},
+	})
+}
+
+// GetCryptoOrderHistory handles GET /api/dist/topup/crypto/history
+func GetCryptoOrderHistory(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	orders, total, err := model.GetUserCryptoTransactions(userId, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+
+	now := time.Now().Unix()
+	items := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		if (order.Status == model.CryptoStatusPending || order.Status == model.CryptoStatusProcessing) && order.IsExpired(now) {
+			_ = model.ExpireCryptoTransaction(order.TradeNo, "订单超时未完成")
+			order.Status = model.CryptoStatusExpired
+			order.FailReason = "订单超时未完成"
+		}
+		items = append(items, gin.H{
+			"trade_no":           order.TradeNo,
+			"status":             order.Status,
+			"amount":             order.ExpectedAmount,
+			"actual_amount":      order.ActualAmount,
+			"chain":              order.Chain,
+			"token":              order.Token,
+			"tx_hash":            order.TxHash,
+			"fail_reason":        order.FailReason,
+			"wallet":             order.WalletAddress,
+			"payment_method":     "crypto",
+			"payment_expired_at": order.ExpiredAt - int64((operation_setting.CryptoOrderExpiryMinutes-operation_setting.CryptoPaymentWindowMinutes)*60),
+			"expired_at":         order.ExpiredAt,
+			"create_time":        order.CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"items":     items,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
 		},
 	})
 }

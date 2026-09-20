@@ -95,6 +95,7 @@ func SetDistRouter(router *gin.Engine) {
 		authGroup.POST("/topup/crypto/pay", controller.CreateCryptoOrder)
 		authGroup.POST("/topup/crypto/submit", controller.SubmitCryptoTxHash)
 		authGroup.GET("/topup/crypto/status", controller.GetCryptoOrderStatus)
+		authGroup.GET("/topup/crypto/history", controller.GetCryptoOrderHistory)
 		authGroup.POST("/topup/redeem", controller.DistRedeemCode)
 		authGroup.POST("/topup/pay", controller.RequestEpay)
 		authGroup.POST("/topup/stripe/pay", controller.RequestStripePay)
