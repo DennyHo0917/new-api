@@ -2,6 +2,7 @@
 
 ## 2026-09-20 切流前运行安全加固
 
+- [x] 保留并展示旧站余额：用户通过旧站凭据登录时读取 SubRouter 当前余额，作为独立 `legacy_quota` 快照保存；前端展示余额为本地余额与旧站余额之和，但本地数据库可消费 `quota` 不增加，历史 Key 继续路由 SubRouter，明确额度耗尽后原子清零旧余额标记并切换对应历史 Key。已有迁移用户再次使用密码登录时会尽力刷新旧站余额，失败不阻断本地登录且不记录密码。覆盖设置字段保留、异常额度拒绝且不落库、普通限流不清零、明确耗尽不改本地额度等回归；service/middleware/controller/model 全量测试、后端构建及 VPS PostgreSQL 15 隔离库实测通过，临时库与角色已删除（2026-09-21）。
 - [x] 用户头像统一展示：Google、GitHub、X、Discord、OIDC、Telegram、Linux DO 及自定义 OAuth 在提供头像时保存公开 HTTPS 地址，既有第三方用户下次登录或绑定时自动补齐；右上角优先显示第三方头像，地址缺失或加载失败时回退到显示名称、用户名或邮箱首字母。拒绝非 HTTPS、含凭据或超过 2048 字符的头像地址，头像保存失败不阻断登录。OAuth/model/controller 全量测试、后端构建与前端生产构建通过（2026-09-20）。
 - [x] 修复旧站密码校验成功后 API Key 同步失败：回源的用户信息和 Key 请求带上旧站要求的 `New-Api-User` 身份头，不放宽密码校验或本地账户防覆盖规则。回归测试会拒绝缺失/错误身份头的 Key 同步；service 定向及全量测试、controller 编译和 `go build ./...` 通过（2026-09-20）。
 - [x] 修复真实旧站登录响应未必携带用户 ID 时的迁移失败：登录成功后复用认证 Session 查询旧站 `/api/dist/user/self` 或 `/api/user/self` 补全用户信息；预同步占位记录在上游仍不返回 ID 时使用已核对的 `subrouter_id`，新用户则仍必须获得有效 ID。回源失败日志仅记录 `upstream_auth_failed` / `not_eligible` / `token_sync_failed` 等分类，不记录密码或 Session。已覆盖嵌套/平铺登录响应、用户信息回退、占位 ID 回退、Key 失败回滚及本地账户防覆盖；SQLite、PostgreSQL 15.19 隔离库、service 全量回归与 `go build ./...` 通过，临时库和角色已删除（2026-09-20）。

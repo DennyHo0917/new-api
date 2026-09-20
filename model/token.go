@@ -52,9 +52,33 @@ func MarkLegacySubRouterTokenExhausted(tokenID int) error {
 	if tokenID <= 0 {
 		return errors.New("invalid token id")
 	}
-	return DB.Model(&Token{}).
-		Where("id = ? AND "+commonGroupCol+" = ?", tokenID, LegacySubRouterGroup).
-		Update("group", LegacySubRouterExhaustedGroup).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var token Token
+		if err := tx.Select("id", "user_id", "group").First(&token, tokenID).Error; err != nil {
+			return err
+		}
+		if token.Group != LegacySubRouterGroup {
+			return nil
+		}
+		if err := tx.Model(&Token{}).
+			Where("id = ? AND "+commonGroupCol+" = ?", tokenID, LegacySubRouterGroup).
+			Update("group", LegacySubRouterExhaustedGroup).Error; err != nil {
+			return err
+		}
+		var user User
+		if err := tx.Select("id", "setting").First(&user, token.UserId).Error; err != nil {
+			return err
+		}
+		var marker legacySubRouterSetting
+		if err := common.UnmarshalJsonStr(user.Setting, &marker); err != nil || marker.SubRouterID <= 0 {
+			return nil
+		}
+		setting, err := MergeLegacySubRouterSetting(user.Setting, marker.SubRouterID, 0, common.GetTimestamp())
+		if err != nil {
+			return err
+		}
+		return tx.Model(&User{}).Where("id = ?", user.Id).Update("setting", setting).Error
+	})
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {

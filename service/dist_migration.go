@@ -34,6 +34,7 @@ type subRouterLoginResponseData struct {
 	Username    string                      `json:"username"`
 	DisplayName string                      `json:"display_name"`
 	Email       string                      `json:"email"`
+	Quota       *int64                      `json:"quota"`
 	User        *subRouterLoginResponseData `json:"user"`
 }
 
@@ -52,6 +53,106 @@ type subRouterTokenListResponse struct {
 	Success bool                 `json:"success"`
 	Message string               `json:"message"`
 	Data    []subRouterTokenItem `json:"data"`
+}
+
+func unwrapSubRouterUser(data subRouterLoginResponseData) subRouterLoginResponseData {
+	if data.User == nil {
+		return data
+	}
+	user := *data.User
+	if user.Quota == nil {
+		user.Quota = data.Quota
+	}
+	return user
+}
+
+func authenticateSubRouterUser(username, password string, knownUserID int) (subRouterLoginResponseData, *http.Client, error) {
+	baseURL := GetSubRouterBaseURL()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return subRouterLoginResponseData{}, nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+	client := &http.Client{Timeout: 15 * time.Second, Jar: jar}
+	loginPayload, err := common.Marshal(map[string]string{"username": username, "password": password})
+	if err != nil {
+		return subRouterLoginResponseData{}, nil, err
+	}
+
+	var loginUser subRouterLoginResponseData
+	loginSuccess := false
+	for _, endpoint := range []string{baseURL + "/api/dist/user/login", baseURL + "/api/user/login"} {
+		req, reqErr := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(loginPayload))
+		if reqErr != nil {
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
+		resp, respErr := client.Do(req)
+		if respErr != nil {
+			common.SysLog(fmt.Sprintf("SubRouter login request error to %s: %v", endpoint, respErr))
+			continue
+		}
+		respBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		var parsed subRouterLoginResponse
+		if common.Unmarshal(respBytes, &parsed) == nil && parsed.Success {
+			loginUser = unwrapSubRouterUser(parsed.Data)
+			loginSuccess = true
+			break
+		}
+	}
+	if !loginSuccess {
+		return subRouterLoginResponseData{}, nil, ErrSubRouterAuthFailed
+	}
+
+	requestUserID := knownUserID
+	if requestUserID <= 0 {
+		requestUserID = loginUser.Id
+	}
+	for _, endpoint := range []string{baseURL + "/api/dist/user/self", baseURL + "/api/user/self"} {
+		req, reqErr := http.NewRequest(http.MethodGet, endpoint, nil)
+		if reqErr != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
+		if requestUserID > 0 {
+			req.Header.Set("New-Api-User", strconv.Itoa(requestUserID))
+		}
+		resp, reqErr := client.Do(req)
+		if reqErr != nil {
+			continue
+		}
+		respBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		var parsed subRouterLoginResponse
+		if common.Unmarshal(respBytes, &parsed) != nil || !parsed.Success {
+			continue
+		}
+		self := unwrapSubRouterUser(parsed.Data)
+		if self.Id > 0 {
+			loginUser.Id = self.Id
+		}
+		if self.Username != "" {
+			loginUser.Username = self.Username
+		}
+		if self.DisplayName != "" {
+			loginUser.DisplayName = self.DisplayName
+		}
+		if self.Email != "" {
+			loginUser.Email = self.Email
+		}
+		if self.Quota != nil {
+			loginUser.Quota = self.Quota
+		}
+		break
+	}
+	return loginUser, client, nil
 }
 
 // AuthenticateAndMigrateSubRouterUser verifies a legacy user with upstream
@@ -75,115 +176,13 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		localUser = model.User{}
 	}
 
-	baseURL := GetSubRouterBaseURL()
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	knownLegacyUserID := 0
+	if localUserExists {
+		knownLegacyUserID = migrationMarker.SubRouterID
 	}
-
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Jar:     jar,
-	}
-
-	loginPayload, err := common.Marshal(map[string]string{
-		"username": username,
-		"password": password,
-	})
+	loginUser, client, err := authenticateSubRouterUser(username, password, knownLegacyUserID)
 	if err != nil {
 		return nil, err
-	}
-
-	// 1. Try /api/dist/user/login first, then fallback to /api/user/login
-	loginEndpoints := []string{
-		baseURL + "/api/dist/user/login",
-		baseURL + "/api/user/login",
-	}
-
-	var parsedLogin subRouterLoginResponse
-	var loginSuccess bool
-
-	for _, endpoint := range loginEndpoints {
-		req, reqErr := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(loginPayload))
-		if reqErr != nil {
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
-
-		resp, respErr := client.Do(req)
-		if respErr != nil {
-			common.SysLog(fmt.Sprintf("SubRouter login request error to %s: %v", endpoint, respErr))
-			continue
-		}
-		respBytes, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			continue
-		}
-
-		var parsedResp subRouterLoginResponse
-		if unmarshalErr := common.Unmarshal(respBytes, &parsedResp); unmarshalErr == nil && parsedResp.Success {
-			parsedLogin = parsedResp
-			loginSuccess = true
-			break
-		}
-	}
-
-	if !loginSuccess {
-		return nil, ErrSubRouterAuthFailed
-	}
-
-	loginUser := parsedLogin.Data
-	if loginUser.User != nil {
-		loginUser = *loginUser.User
-	}
-	if loginUser.Id <= 0 {
-		knownLegacyUserID := 0
-		if localUserExists {
-			knownLegacyUserID = migrationMarker.SubRouterID
-		}
-		for _, selfEndpoint := range []string{baseURL + "/api/dist/user/self", baseURL + "/api/user/self"} {
-			selfReq, err := http.NewRequest(http.MethodGet, selfEndpoint, nil)
-			if err != nil {
-				continue
-			}
-			selfReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
-			if knownLegacyUserID > 0 {
-				selfReq.Header.Set("New-Api-User", strconv.Itoa(knownLegacyUserID))
-			}
-			selfResp, err := client.Do(selfReq)
-			if err != nil {
-				continue
-			}
-			selfBytes, err := io.ReadAll(selfResp.Body)
-			_ = selfResp.Body.Close()
-			if err != nil {
-				continue
-			}
-			var parsedSelf subRouterLoginResponse
-			if err := common.Unmarshal(selfBytes, &parsedSelf); err != nil || !parsedSelf.Success {
-				continue
-			}
-			selfUser := parsedSelf.Data
-			if selfUser.User != nil {
-				selfUser = *selfUser.User
-			}
-			if selfUser.Id > 0 {
-				if selfUser.Username == "" {
-					selfUser.Username = loginUser.Username
-				}
-				if selfUser.DisplayName == "" {
-					selfUser.DisplayName = loginUser.DisplayName
-				}
-				if selfUser.Email == "" {
-					selfUser.Email = loginUser.Email
-				}
-				loginUser = selfUser
-				break
-			}
-		}
 	}
 	if localUserExists {
 		if loginUser.Id > 0 && loginUser.Id != migrationMarker.SubRouterID {
@@ -200,9 +199,32 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 	}
 	displayName := strings.TrimSpace(loginUser.DisplayName)
 	email := model.NormalizeEmail(loginUser.Email)
+	var existingBalance struct {
+		Quota *int64 `json:"subrouter_old_quota"`
+	}
+	if localUser.Setting != "" {
+		_ = common.UnmarshalJsonStr(localUser.Setting, &existingBalance)
+	}
+	if loginUser.Quota == nil && existingBalance.Quota == nil {
+		return nil, errors.New("SubRouter quota unavailable")
+	}
+	legacyQuota := localUser.LegacySubRouterQuota()
+	legacyQuotaUpdatedAt := localUser.LegacySubRouterQuotaUpdatedAt()
+	if loginUser.Quota != nil {
+		if *loginUser.Quota < 0 || *loginUser.Quota > int64(common.MaxWalletQuota) {
+			return nil, errors.New("invalid SubRouter quota")
+		}
+		legacyQuota = *loginUser.Quota
+		legacyQuotaUpdatedAt = common.GetTimestamp()
+	}
+	mergedSetting, err := model.MergeLegacySubRouterSetting(localUser.Setting, loginUser.Id, legacyQuota, legacyQuotaUpdatedAt)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Fetch historical API keys before completing password migration. If this
 	// fails, the account remains eligible for a later retry instead of losing keys.
+	baseURL := GetSubRouterBaseURL()
 	tokenEndpoints := []string{
 		baseURL + "/api/dist/token/list",
 		baseURL + "/api/token/list",
@@ -247,7 +269,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		if localUserExists {
-			updates := map[string]any{"password": hashedPassword}
+			updates := map[string]any{"password": hashedPassword, "setting": mergedSetting}
 			if email != "" && localUser.Email == "" {
 				updates["email"] = email
 			}
@@ -276,10 +298,6 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 			if conflictCount > 0 {
 				return ErrSubRouterMigrationNotEligible
 			}
-			setting, err := common.Marshal(map[string]int{"subrouter_id": loginUser.Id})
-			if err != nil {
-				return err
-			}
 			localUser = model.User{
 				Username:    username,
 				Password:    hashedPassword,
@@ -290,7 +308,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 				Quota:       0,
 				Group:       "default",
 				AffCode:     common.GetRandomString(8),
-				Setting:     string(setting),
+				Setting:     mergedSetting,
 				Remark:      fmt.Sprintf("SubRouter ID: %d", loginUser.Id),
 			}
 			if err := tx.Create(&localUser).Error; err != nil {
@@ -349,6 +367,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 
 	if localUserExists {
 		localUser.Password = hashedPassword
+		localUser.Setting = mergedSetting
 		if email != "" && localUser.Email == "" {
 			localUser.Email = email
 		}
@@ -365,6 +384,42 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 	common.SysLog(fmt.Sprintf("[Migration] Completed one-time password and API key migration for user ID %d", localUser.Id))
 
 	return &localUser, nil
+}
+
+// RefreshSubRouterLegacyBalance refreshes display-only legacy quota after a
+// successful local password check. Failure never changes local authentication.
+func RefreshSubRouterLegacyBalance(user *model.User, username, password string) error {
+	if user == nil || user.Id <= 0 {
+		return ErrSubRouterMigrationNotEligible
+	}
+	var marker struct {
+		SubRouterID int `json:"subrouter_id"`
+	}
+	if common.UnmarshalJsonStr(user.Setting, &marker) != nil || marker.SubRouterID <= 0 {
+		return nil
+	}
+	if user.LegacySubRouterQuotaUpdatedAt() > 0 {
+		return nil
+	}
+	upstreamUser, _, err := authenticateSubRouterUser(username, password, marker.SubRouterID)
+	if err != nil {
+		return err
+	}
+	if upstreamUser.Id > 0 && upstreamUser.Id != marker.SubRouterID {
+		return ErrSubRouterMigrationNotEligible
+	}
+	if upstreamUser.Quota == nil || *upstreamUser.Quota < 0 || *upstreamUser.Quota > int64(common.MaxWalletQuota) {
+		return errors.New("SubRouter quota unavailable")
+	}
+	setting, err := model.MergeLegacySubRouterSetting(user.Setting, marker.SubRouterID, *upstreamUser.Quota, common.GetTimestamp())
+	if err != nil {
+		return err
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("setting", setting).Error; err != nil {
+		return err
+	}
+	user.Setting = setting
+	return nil
 }
 
 type SubRouterCustomerRecord struct {

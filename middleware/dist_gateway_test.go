@@ -42,6 +42,11 @@ func TestDistDualTrackGateway(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":{"message":"too many requests","code":"rate_limit_exceeded"}}`))
 			return
 		}
+		if r.Header.Get("X-Test-Upstream") == "exhausted" {
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"insufficient quota","code":"insufficient_quota"}}`))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"origin":"subrouter_upstream"}`))
 	}))
@@ -88,16 +93,19 @@ func TestDistDualTrackGateway(t *testing.T) {
 	}
 	require.NoError(t, model.DB.Create(&localActiveToken).Error)
 
-	// 2. Create a migrated SubRouter user with ZERO quota
+	// 2. Create a migrated SubRouter user with separate local and legacy quota.
+	legacySetting, err := model.MergeLegacySubRouterSetting("", 88, 750000, common.GetTimestamp())
+	require.NoError(t, err)
 	migratedUser := model.User{
 		Username: "migrated_user_zero_quota",
 		Password: "password123",
 		Role:     common.RoleCommonUser,
 		Status:   common.UserStatusEnabled,
-		Quota:    0,
+		Quota:    123456,
+		Setting:  legacySetting,
 	}
 	require.NoError(t, migratedUser.Insert(0))
-	_ = model.DB.Model(&migratedUser).Update("quota", 0).Error
+	require.NoError(t, model.DB.Model(&migratedUser).Update("quota", 123456).Error)
 
 	migratedToken := model.Token{
 		UserId:         migratedUser.Id,
@@ -152,4 +160,19 @@ func TestDistDualTrackGateway(t *testing.T) {
 	assert.Contains(t, recD.Body.String(), "rate_limit_exceeded")
 	require.NoError(t, model.DB.First(&migratedToken, migratedToken.Id).Error)
 	assert.Equal(t, model.LegacySubRouterGroup, migratedToken.Group)
+
+	// Case E: Explicit upstream exhaustion clears only display-only legacy
+	// balance; the user's local spendable quota is unchanged.
+	reqE := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	reqE.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
+	reqE.Header.Set("X-Test-Upstream", "exhausted")
+	recE := newDistRecorder()
+	router.ServeHTTP(recE, reqE)
+	assert.Equal(t, http.StatusTooManyRequests, recE.Code)
+	require.NoError(t, model.DB.First(&migratedToken, migratedToken.Id).Error)
+	assert.Equal(t, model.LegacySubRouterExhaustedGroup, migratedToken.Group)
+	var reloadedUser model.User
+	require.NoError(t, model.DB.First(&reloadedUser, migratedUser.Id).Error)
+	assert.Equal(t, 123456, reloadedUser.Quota)
+	assert.Zero(t, reloadedUser.LegacySubRouterQuota())
 }

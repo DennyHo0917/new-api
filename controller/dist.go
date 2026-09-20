@@ -340,6 +340,9 @@ func DistLogin(c *gin.Context) {
 	}
 	err = localUser.ValidateAndFill()
 	if err == nil {
+		if refreshErr := service.RefreshSubRouterLegacyBalance(&localUser, username, password); refreshErr != nil {
+			logger.LogWarn(c, "[Migration] Legacy balance refresh failed")
+		}
 		setupLogin(&localUser, c)
 		return
 	}
@@ -392,7 +395,10 @@ func DistGetUserSelf(c *gin.Context) {
 			"role":                    user.Role,
 			"status":                  user.Status,
 			"group":                   user.Group,
-			"quota":                   user.Quota,
+			"quota":                   user.DisplayQuota(),
+			"local_quota":             user.Quota,
+			"legacy_quota":            user.LegacySubRouterQuota(),
+			"legacy_quota_updated_at": user.LegacySubRouterQuotaUpdatedAt(),
 			"used_quota":              user.UsedQuota,
 			"request_count":           user.RequestCount,
 			"aff_code":                user.AffCode,
@@ -532,9 +538,12 @@ func DistGetUserUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"quota":         user.Quota,
-			"used_quota":    user.UsedQuota,
-			"request_count": user.RequestCount,
+			"quota":                   user.DisplayQuota(),
+			"local_quota":             user.Quota,
+			"legacy_quota":            user.LegacySubRouterQuota(),
+			"legacy_quota_updated_at": user.LegacySubRouterQuotaUpdatedAt(),
+			"used_quota":              user.UsedQuota,
+			"request_count":           user.RequestCount,
 		},
 	})
 }

@@ -2,6 +2,7 @@ package model
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -18,6 +19,12 @@ import (
 )
 
 const UserNameMaxLength = 20
+
+type legacySubRouterSetting struct {
+	SubRouterID             int   `json:"subrouter_id"`
+	SubRouterOldQuota       int64 `json:"subrouter_old_quota"`
+	SubRouterQuotaUpdatedAt int64 `json:"subrouter_quota_updated_at"`
+}
 
 var userSortColumns = map[string]string{
 	"id":            "id",
@@ -196,6 +203,60 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 		return
 	}
 	user.Setting = string(settingBytes)
+}
+
+func (user *User) LegacySubRouterQuota() int64 {
+	var setting legacySubRouterSetting
+	if user == nil || common.UnmarshalJsonStr(user.Setting, &setting) != nil || setting.SubRouterOldQuota <= 0 {
+		return 0
+	}
+	return min(setting.SubRouterOldQuota, int64(common.MaxWalletQuota))
+}
+
+func (user *User) LegacySubRouterQuotaUpdatedAt() int64 {
+	var setting legacySubRouterSetting
+	if user == nil || common.UnmarshalJsonStr(user.Setting, &setting) != nil {
+		return 0
+	}
+	return setting.SubRouterQuotaUpdatedAt
+}
+
+func (user *User) DisplayQuota() int64 {
+	localQuota := int64(user.Quota)
+	legacyQuota := user.LegacySubRouterQuota()
+	if localQuota >= int64(common.MaxWalletQuota)-legacyQuota {
+		return int64(common.MaxWalletQuota)
+	}
+	return localQuota + legacyQuota
+}
+
+func MergeLegacySubRouterSetting(current string, subRouterID int, quota int64, updatedAt int64) (string, error) {
+	if subRouterID <= 0 || quota < 0 || quota > int64(common.MaxWalletQuota) || updatedAt < 0 {
+		return "", errors.New("invalid SubRouter balance")
+	}
+	setting := map[string]json.RawMessage{}
+	if strings.TrimSpace(current) != "" {
+		if err := common.UnmarshalJsonStr(current, &setting); err != nil {
+			return "", err
+		}
+	}
+	values := map[string]any{
+		"subrouter_id":               subRouterID,
+		"subrouter_old_quota":        quota,
+		"subrouter_quota_updated_at": updatedAt,
+	}
+	for key, value := range values {
+		raw, err := common.Marshal(value)
+		if err != nil {
+			return "", err
+		}
+		setting[key] = raw
+	}
+	encoded, err := common.Marshal(setting)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func UpdateUserSetting(userId int, setting dto.UserSetting) error {

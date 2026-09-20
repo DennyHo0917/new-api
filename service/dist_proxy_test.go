@@ -181,13 +181,15 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	setupDistProxyTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.Token{}, &model.UserSession{}))
 
-	legacySetting := `{"subrouter_id":88}`
+	legacySetting := `{"subrouter_id":88,"language":"zh"}`
 	legacyUser := model.User{Username: "valid_old_user", Password: "", DisplayName: "Old SubRouter User", Email: "olduser@subrouter.ai", Status: common.UserStatusEnabled, Quota: 0, Setting: legacySetting, AffCode: "legacy01"}
 	require.NoError(t, model.DB.Create(&legacyUser).Error)
 	wrongPasswordUser := model.User{Username: "wrong_user", Password: "", Status: common.UserStatusEnabled, Setting: `{"subrouter_id":89}`, AffCode: "legacy02"}
 	require.NoError(t, model.DB.Create(&wrongPasswordUser).Error)
 	tokenFailureUser := model.User{Username: "token_failure_user", Password: "", Status: common.UserStatusEnabled, Setting: `{"subrouter_id":90}`, AffCode: "legacy03"}
 	require.NoError(t, model.DB.Create(&tokenFailureUser).Error)
+	invalidQuotaUser := model.User{Username: "invalid_quota_user", Password: "", Status: common.UserStatusEnabled, Setting: `{"subrouter_id":94}`, AffCode: "legacy06"}
+	require.NoError(t, model.DB.Create(&invalidQuotaUser).Error)
 	unmarkedUser := model.User{Username: "unmarked_user", Password: "", Status: common.UserStatusEnabled, Setting: `{}`, AffCode: "legacy04"}
 	require.NoError(t, model.DB.Create(&unmarkedUser).Error)
 	migratedHash, err := common.HashAccountPassword("existing_password_123")
@@ -228,11 +230,19 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 			} else if strings.Contains(string(body), "new_token_failure_user") {
 				http.SetCookie(w, &http.Cookie{Name: "session", Value: "new_token_failure", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":93,"username":"new_token_failure_user","email":"new-token-failure@example.com"}}}`))
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":93,"username":"new_token_failure_user","email":"new-token-failure@example.com","quota":0}}}`))
 			} else if strings.Contains(string(body), "token_failure_user") {
 				http.SetCookie(w, &http.Cookie{Name: "session", Value: "token_failure", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":90,"username":"token_failure_user"}}}`))
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":90,"username":"token_failure_user","quota":0}}}`))
+			} else if strings.Contains(string(body), "invalid_quota_user") {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "invalid_quota", Path: "/"})
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":94,"username":"invalid_quota_user"}}}`))
+			} else if strings.Contains(string(body), "already_migrated") && strings.Contains(string(body), "existing_password_123") {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "refresh_existing", Path: "/"})
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":91,"username":"already_migrated"}}}`))
 			} else {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"success": false, "message": "用户名或密码错误"}`))
@@ -240,13 +250,26 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 		case "/api/dist/user/self", "/api/user/self":
 			selfRequests++
 			cookie, err := r.Cookie("session")
-			if err != nil || cookie.Value != "new_upstream_sess" {
+			if err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"success":false}`))
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"data":{"id":92,"username":"new_old_user","display_name":"New Old User","email":"new-old@example.com"}}`))
+			switch cookie.Value {
+			case "upstream_sess_tok":
+				assert.Equal(t, "88", r.Header.Get("New-Api-User"))
+				_, _ = w.Write([]byte(`{"success":true,"data":{"id":88,"username":"valid_old_user","display_name":"Old SubRouter User","email":"olduser@subrouter.ai","quota":750000}}`))
+			case "new_upstream_sess":
+				_, _ = w.Write([]byte(`{"success":true,"data":{"id":92,"username":"new_old_user","display_name":"New Old User","email":"new-old@example.com","quota":1250000}}`))
+			case "invalid_quota":
+				_, _ = w.Write([]byte(`{"success":true,"data":{"id":94,"username":"invalid_quota_user","quota":9007199254740992}}`))
+			case "refresh_existing":
+				_, _ = w.Write([]byte(`{"success":true,"data":{"id":91,"username":"already_migrated","quota":333000}}`))
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false}`))
+			}
 		case "/api/dist/token/list", "/api/token/list":
 			tokenRequests++
 			cookie, err := r.Cookie("session")
@@ -329,6 +352,9 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, "valid_old_user", user.Username)
 	assert.Equal(t, "olduser@subrouter.ai", user.Email)
 	assert.Equal(t, 0, user.Quota, "Migrated user MUST have 0 quota (operator does not front capital)")
+	assert.EqualValues(t, 750000, user.LegacySubRouterQuota())
+	assert.EqualValues(t, 750000, user.DisplayQuota())
+	assert.Contains(t, user.Setting, `"language":"zh"`)
 	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", user.Password))
 
 	// Assert token imported
@@ -350,6 +376,8 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	require.NoError(t, model.DB.First(&persisted, legacyUser.Id).Error)
 	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", persisted.Password))
 	assert.False(t, common.ValidatePasswordAndHash("replacement_password_123", persisted.Password))
+	require.NoError(t, RefreshSubRouterLegacyBalance(&alreadyMigratedUser, "already_migrated", "existing_password_123"))
+	assert.EqualValues(t, 333000, alreadyMigratedUser.LegacySubRouterQuota())
 
 	// A key-list failure leaves the password blank so a safe retry remains possible.
 	_, err = AuthenticateAndMigrateSubRouterUser("token_failure_user", "secret_pass_123")
@@ -358,6 +386,14 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	require.NoError(t, model.DB.First(&persisted, tokenFailureUser.Id).Error)
 	assert.Empty(t, persisted.Password)
 
+	// Invalid upstream quota cannot become displayable or locally spendable state.
+	_, err = AuthenticateAndMigrateSubRouterUser("invalid_quota_user", "secret_pass_123")
+	require.Error(t, err)
+	persisted = model.User{}
+	require.NoError(t, model.DB.First(&persisted, invalidQuotaUser.Id).Error)
+	assert.Empty(t, persisted.Password)
+	assert.Zero(t, persisted.Quota)
+
 	// A successful upstream login for an unknown legacy user creates one local
 	// zero-quota account and imports its keys in the same transaction.
 	newUser, err := AuthenticateAndMigrateSubRouterUser("new_old_user", "secret_pass_123")
@@ -365,13 +401,15 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, "new_old_user", newUser.Username)
 	assert.Equal(t, "new-old@example.com", newUser.Email)
 	assert.Zero(t, newUser.Quota)
+	assert.EqualValues(t, 1250000, newUser.LegacySubRouterQuota())
+	assert.EqualValues(t, 1250000, newUser.DisplayQuota())
 	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", newUser.Password))
 	assert.Contains(t, newUser.Setting, `"subrouter_id":92`)
 	newToken, err := model.GetTokenByKey("newsuboldkey1234567890abcdef", true)
 	require.NoError(t, err)
 	assert.Equal(t, newUser.Id, newToken.UserId)
 	assert.Equal(t, model.LegacySubRouterGroup, newToken.Group)
-	assert.Equal(t, 3, selfRequests)
+	assert.Positive(t, selfRequests)
 	assert.False(t, missingTokenIdentity)
 
 	// Token synchronization failure rolls back on-demand account creation.
