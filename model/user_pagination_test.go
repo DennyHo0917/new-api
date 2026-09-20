@@ -64,3 +64,16 @@ func TestSearchUsersSortsBeforePagination(t *testing.T) {
 	assert.Equal(t, int64(42), total)
 	assert.Equal(t, []int{21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40}, collectUserIDs(users))
 }
+
+func TestGetAllUsersIncludesGoogleIdentity(t *testing.T) {
+	truncateTables(t)
+	insertUsersForPaginationTest(t, 2)
+	provider := &CustomOAuthProvider{Name: "Google", Slug: "google", ClientId: "client", AuthorizationEndpoint: "https://accounts.example/authorize", TokenEndpoint: "https://accounts.example/token", UserInfoEndpoint: "https://accounts.example/userinfo"}
+	require.NoError(t, DB.Create(provider).Error)
+	require.NoError(t, DB.Create(&UserOAuthBinding{UserId: 2, ProviderId: provider.Id, ProviderUserId: "google-subject-2"}).Error)
+
+	users, _, err := GetAllUsers(&common.PageInfo{Page: 1, PageSize: 20}, NewUserSortOptions("id", "asc"))
+	require.NoError(t, err)
+	assert.Empty(t, users[0].GoogleId)
+	assert.Equal(t, "google-subject-2", users[1].GoogleId)
+}

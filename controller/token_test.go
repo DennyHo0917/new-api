@@ -410,6 +410,34 @@ func TestTokenAutoMigrateUsesVarchar128KeyColumn(t *testing.T) {
 	}
 }
 
+func TestDistCreateTokenDefaultsToUserQuota(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/dist/token/create", map[string]any{"name": "Default API Key"}, 18)
+
+	DistCreateToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+	var token model.Token
+	require.NoError(t, db.Where("user_id = ?", 18).First(&token).Error)
+	assert.True(t, token.UnlimitedQuota)
+	assert.Equal(t, -1, int(token.ExpiredTime))
+}
+
+func TestDistCreateTokenPreservesExplicitQuotaLimit(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/dist/token/create", map[string]any{"name": "Limited", "unlimited_quota": false, "remain_quota": 25}, 19)
+
+	DistCreateToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success)
+	var token model.Token
+	require.NoError(t, db.Where("user_id = ?", 19).First(&token).Error)
+	assert.False(t, token.UnlimitedQuota)
+	assert.Equal(t, 25, token.RemainQuota)
+}
+
 func TestTokenMigrationFromChar48ToVarchar128(t *testing.T) {
 	db := openTokenControllerTestDB(t)
 	runTokenMigrationCompatibilityTest(t, db, "sqlite", nil)

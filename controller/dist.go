@@ -591,7 +591,7 @@ func DistCreateToken(c *gin.Context) {
 		Name           string `json:"name"`
 		RemainQuota    int64  `json:"remain_quota"`
 		ExpiredTime    int64  `json:"expired_time"`
-		UnlimitedQuota bool   `json:"unlimited_quota"`
+		UnlimitedQuota *bool  `json:"unlimited_quota"`
 		Models         string `json:"models"`
 		Group          string `json:"group"`
 		Subnet         string `json:"subnet"`
@@ -607,6 +607,10 @@ func DistCreateToken(c *gin.Context) {
 	}
 
 	rawKey := common.GetRandomString(48)
+	unlimitedQuota := true
+	if req.UnlimitedQuota != nil {
+		unlimitedQuota = *req.UnlimitedQuota
+	}
 	cleanToken := model.Token{
 		UserId:             userId,
 		Name:               req.Name,
@@ -615,7 +619,7 @@ func DistCreateToken(c *gin.Context) {
 		AccessedTime:       common.GetTimestamp(),
 		ExpiredTime:        req.ExpiredTime,
 		RemainQuota:        int(req.RemainQuota),
-		UnlimitedQuota:     req.UnlimitedQuota,
+		UnlimitedQuota:     unlimitedQuota,
 		ModelLimits:        req.Models,
 		ModelLimitsEnabled: req.Models != "",
 		Group:              strings.TrimSpace(req.Group),

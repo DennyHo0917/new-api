@@ -112,6 +112,7 @@ type User struct {
 	LastLoginAt          int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 	AuthVersion          int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
 	AdminPermissions     map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	GoogleId             string                     `json:"google_id,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -440,6 +441,10 @@ func GetAllUsers(pageInfo *common.PageInfo, sortOptions ...UserSortOptions) (use
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = attachGoogleIDs(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// Commit transaction
 	if err = tx.Commit().Error; err != nil {
@@ -509,6 +514,10 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 		tx.Rollback()
 		return nil, 0, err
 	}
+	if err = attachGoogleIDs(tx, users); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	// 提交事务
 	if err = tx.Commit().Error; err != nil {
@@ -516,6 +525,35 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	}
 
 	return users, total, nil
+}
+
+func attachGoogleIDs(tx *gorm.DB, users []*User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	userIDs := make([]int, 0, len(users))
+	for _, user := range users {
+		userIDs = append(userIDs, user.Id)
+	}
+	var bindings []struct {
+		UserId         int
+		ProviderUserId string
+	}
+	if err := tx.Table("user_oauth_bindings AS bindings").
+		Select("bindings.user_id, bindings.provider_user_id").
+		Joins("JOIN custom_oauth_providers AS providers ON providers.id = bindings.provider_id").
+		Where("providers.slug = ? AND bindings.user_id IN ?", "google", userIDs).
+		Scan(&bindings).Error; err != nil {
+		return err
+	}
+	byUserID := make(map[int]string, len(bindings))
+	for _, binding := range bindings {
+		byUserID[binding.UserId] = binding.ProviderUserId
+	}
+	for _, user := range users {
+		user.GoogleId = byUserID[user.Id]
+	}
+	return nil
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {
