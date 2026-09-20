@@ -255,7 +255,7 @@
   - [x] 2026-09-17 修复管理员充值搜索使用旧页码的问题：输入值与已应用关键词分离，提交后回到第一页；前端生产构建通过。浏览器工具返回 unsupported Codex auth method: apikey，交互与视觉验证仍待完成。
   - [x] 2026-09-20 修复后端四包测试隔离：渠道亲和缓存键改用测试名避免 Windows 时钟碰撞；SubRouter 测试恢复全局数据库；审计 SQLite 与重复初始化连接均在清理前关闭；OAuth 与 Kling 用例对齐当前流程和 `Reserve` 目标额度语义。`go test ./middleware ./service ./controller ./model -count=1` 连续两轮通过。
   - [x] 2026-09-20 完成 PostgreSQL 15.19 上线演练：生产镜像在隔离库完成全新迁移、当前生产 schema 升级及重复迁移，规范化 DDL 哈希保持一致；自定义格式备份恢复后 schema 哈希和哨兵数据一致；Token/预填分组/约束/返佣/会话字段、兑换批量删除、即时任务结算、模型管理、模型定价和固定价格计费实库回归通过。零垫资数据形态在事务内验证后回滚；全部临时库、角色、备份及隧道已清理，生产用户数仍为 2，三个容器保持 healthy。
-  - [x] 2026-09-20 新增只读一键切流前检查 `scripts/cutover-preflight.sh`：检查 Compose、三容器健康、核心环境变量存在性、Session Secret、Secure Cookie/可信 Origin、本地状态与 SubRouter 分发入口、PG15 版本与用户数、磁盘、24 小时内数据库备份、后端镜像和 Nginx 配置；不输出密钥值，任一硬门槛失败即返回非零。VPS 再次实测为 14 项通过、2 项失败、0 警告，当前仅 Secure Cookie/可信 Origin 和新鲜数据库备份两项未完成。
+  - [x] 2026-09-20 新增只读一键切流前检查 `scripts/cutover-preflight.sh`：检查 Compose、三容器健康、核心环境变量存在性、Session Secret、Secure Cookie/可信 Origin、本地状态与 SubRouter 分发入口、PG15 版本与用户数、磁盘、24 小时内数据库备份、后端镜像和 Nginx 配置；不输出密钥值，任一硬门槛失败即返回非零。VPS 已配置 Secure Cookie 与 `https://www.api-route.com` 可信 Origin，复检为 15 项通过、1 项失败、0 警告；当前仅切流前新鲜数据库备份未完成。
   - [x] 2026-09-20 完成回滚演练：新增 `scripts/cutover-rollback.sh` 与 `docs/cutover-runbook.md`，部署工作流会在构建前保留当前健康镜像并在部署或最终健康检查失败时自动恢复；VPS 已用同一镜像真实重建后端容器，用户数保持 2、三个 OAuth 配置仍加载、容器恢复 healthy，数据库和余额未变。
   - [x] 2026-09-20 新增 `scripts/cutover-observe.sh`，固定输出 API 状态、三容器健康/重启、5xx/429/超时、SubRouter 代理/额度耗尽/登录迁移、消费/错误/充值/退款、PostgreSQL 连接和 Redis 指标；VPS 五分钟窗口实测通过。
   - [x] 验证页面渲染：首页、67 个模型的模型广场、登录、注册和文档均完成桌面/手机、亮色/暗色及深层路由浏览器回归，无横向溢出或浏览器错误；前端生产构建和全部项目检查通过，并修复已下线分站 Tour 对应的过期检查（2026-09-20）。
