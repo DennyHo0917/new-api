@@ -2,6 +2,7 @@
 
 ## 2026-09-20 切流前运行安全加固
 
+- [x] 修复真实旧站登录响应未必携带用户 ID 时的迁移失败：登录成功后复用认证 Session 查询旧站 `/api/dist/user/self` 或 `/api/user/self` 补全用户信息；预同步占位记录在上游仍不返回 ID 时使用已核对的 `subrouter_id`，新用户则仍必须获得有效 ID。回源失败日志仅记录 `upstream_auth_failed` / `not_eligible` / `token_sync_failed` 等分类，不记录密码或 Session。已覆盖嵌套/平铺登录响应、用户信息回退、占位 ID 回退、Key 失败回滚及本地账户防覆盖；SQLite、PostgreSQL 15.19 隔离库、service 全量回归与 `go build ./...` 通过，临时库和角色已删除（2026-09-20）。
 - [x] 根治切流后旧站用户首次登录：新站尚无本地记录时，仅在 SubRouter 凭据验证成功、返回有效旧站用户 ID 且历史 Key 抓取成功后，事务性创建 Quota=0 的本地账户并导入 Key；失败不留半迁移账户，已有本地账户不得被回源覆盖，预同步占位还会校验旧站 ID 一致。已覆盖错误凭据、Key 抓取失败回滚、重复迁移与本地账户防覆盖；SQLite 定向与 service 全量回归、PostgreSQL 15.19 隔离库实库回归、controller 编译及 `go build ./...` 通过，临时库与角色已删除。保留统一登录失败响应与现有限流，依据 OWASP ASVS 5.0.0 V6/V7 及 Authentication / Session Management Cheat Sheets。后端 `75d300e42` 已推送并部署，生产容器 healthy、重启数 0（2026-09-20）。
 - [x] 修复 Google 登录用户管理与默认 API Key：后台用户列表同时展示用户名、Google 显示名称、邮箱和 Google 唯一 ID；分站创建 Key 未显式指定额度模式时默认跟随用户余额，仍保留显式限额能力，避免新用户自动生成的 Key 固定为 0 额度并返回 401。OAuth 唯一标识仅在管理员接口展示，不写日志；`google_18` 的既有默认 Key 已修正为跟随用户余额，生产 `/v1/models` 返回 200，调用接口在本地余额为 0 时正确返回 403“用户额度不足”而非 401“Invalid token”。model/controller 回归与前端生产构建通过，后端 `829059739`（Deploy #53 成功）与前端 `65af2d5` 已部署（2026-09-20）
 - [x] 切流后修复旧站密码用户 `tt818900@163.com` 无法登录：旧站分销数据确认用户 ID 19480 且账号启用，生产 PostgreSQL 确认本地记录缺失；完整备份后仅写入单条密码留空、Quota=0、`subrouter_id=19480` 的迁移占位记录，未复制旧站余额（2026-09-20）

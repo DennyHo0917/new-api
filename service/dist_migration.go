@@ -139,7 +139,53 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 	if loginUser.User != nil {
 		loginUser = *loginUser.User
 	}
-	if loginUser.Id <= 0 || (localUserExists && loginUser.Id != migrationMarker.SubRouterID) {
+	if loginUser.Id <= 0 {
+		for _, selfEndpoint := range []string{baseURL + "/api/dist/user/self", baseURL + "/api/user/self"} {
+			selfReq, err := http.NewRequest(http.MethodGet, selfEndpoint, nil)
+			if err != nil {
+				continue
+			}
+			selfReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SubRouter-Gateway/1.0")
+			selfResp, err := client.Do(selfReq)
+			if err != nil {
+				continue
+			}
+			selfBytes, err := io.ReadAll(selfResp.Body)
+			_ = selfResp.Body.Close()
+			if err != nil {
+				continue
+			}
+			var parsedSelf subRouterLoginResponse
+			if err := common.Unmarshal(selfBytes, &parsedSelf); err != nil || !parsedSelf.Success {
+				continue
+			}
+			selfUser := parsedSelf.Data
+			if selfUser.User != nil {
+				selfUser = *selfUser.User
+			}
+			if selfUser.Id > 0 {
+				if selfUser.Username == "" {
+					selfUser.Username = loginUser.Username
+				}
+				if selfUser.DisplayName == "" {
+					selfUser.DisplayName = loginUser.DisplayName
+				}
+				if selfUser.Email == "" {
+					selfUser.Email = loginUser.Email
+				}
+				loginUser = selfUser
+				break
+			}
+		}
+	}
+	if localUserExists {
+		if loginUser.Id > 0 && loginUser.Id != migrationMarker.SubRouterID {
+			return nil, ErrSubRouterMigrationNotEligible
+		}
+		if loginUser.Id <= 0 {
+			loginUser.Id = migrationMarker.SubRouterID
+		}
+	} else if loginUser.Id <= 0 {
 		return nil, ErrSubRouterMigrationNotEligible
 	}
 	if strings.TrimSpace(loginUser.Username) != "" {

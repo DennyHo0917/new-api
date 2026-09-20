@@ -352,6 +352,16 @@ func DistLogin(c *gin.Context) {
 		setupLogin(migratedUser, c)
 		return
 	}
+	migrationFailure := "internal_error"
+	switch {
+	case errors.Is(migrateErr, service.ErrSubRouterAuthFailed):
+		migrationFailure = "upstream_auth_failed"
+	case errors.Is(migrateErr, service.ErrSubRouterMigrationNotEligible):
+		migrationFailure = "not_eligible"
+	case errors.Is(migrateErr, service.ErrSubRouterTokenSyncFailed):
+		migrationFailure = "token_sync_failed"
+	}
+	logger.LogWarn(c, "[Migration] Legacy login fallback failed: "+migrationFailure)
 
 	// 3. Both local and upstream authentication failed
 	common.ApiErrorI18n(c, i18n.MsgUserUsernameOrPasswordError)

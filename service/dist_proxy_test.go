@@ -196,6 +196,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	require.NoError(t, model.DB.Create(&alreadyMigratedUser).Error)
 
 	loginRequests := 0
+	selfRequests := 0
 	tokenRequests := 0
 
 	// Mock upstream SubRouter server for login and token list.
@@ -213,7 +214,6 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 					"message": "",
 					"data": {
 						"user": {
-							"id": 88,
 							"username": "valid_old_user",
 							"display_name": "Old SubRouter User",
 							"email": "olduser@subrouter.ai"
@@ -223,7 +223,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 			} else if strings.Contains(string(body), "new_old_user") && strings.Contains(string(body), "secret_pass_123") {
 				http.SetCookie(w, &http.Cookie{Name: "session", Value: "new_upstream_sess", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"success":true,"data":{"id":92,"username":"new_old_user","display_name":"New Old User","email":"new-old@example.com"}}`))
+				_, _ = w.Write([]byte(`{"success":true,"data":{}}`))
 			} else if strings.Contains(string(body), "new_token_failure_user") {
 				http.SetCookie(w, &http.Cookie{Name: "session", Value: "new_token_failure", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
@@ -236,6 +236,16 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"success": false, "message": "用户名或密码错误"}`))
 			}
+		case "/api/dist/user/self", "/api/user/self":
+			selfRequests++
+			cookie, err := r.Cookie("session")
+			if err != nil || cookie.Value != "new_upstream_sess" {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"success":false}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":92,"username":"new_old_user","display_name":"New Old User","email":"new-old@example.com"}}`))
 		case "/api/dist/token/list", "/api/token/list":
 			tokenRequests++
 			cookie, err := r.Cookie("session")
@@ -349,6 +359,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, newUser.Id, newToken.UserId)
 	assert.Equal(t, model.LegacySubRouterGroup, newToken.Group)
+	assert.Equal(t, 3, selfRequests)
 
 	// Token synchronization failure rolls back on-demand account creation.
 	_, err = AuthenticateAndMigrateSubRouterUser("new_token_failure_user", "secret_pass_123")
