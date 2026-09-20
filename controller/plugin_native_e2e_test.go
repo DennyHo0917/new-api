@@ -56,7 +56,10 @@ func (b *nativeRouteBilling) GetPreConsumedQuota() int {
 
 func (b *nativeRouteBilling) Reserve(quota int) error {
 	b.events = append(b.events, "reserve")
-	if err := model.DecreaseUserQuota(b.userID, quota, true); err != nil {
+	if quota <= b.preConsumed {
+		return nil
+	}
+	if err := model.DecreaseUserQuota(b.userID, quota-b.preConsumed, true); err != nil {
 		return err
 	}
 	b.preConsumed = quota
@@ -184,7 +187,7 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 	outcome, taskErr := executeTaskSubmissionWith(submitContext, relayInfo, relay.RelayTaskSubmit)
 	require.Nil(t, taskErr)
 	require.NotNil(t, outcome)
-	require.Equal(t, []string{"reserve", "settle"}, billing.events)
+	require.Equal(t, []string{"reserve", "reserve", "settle"}, billing.events)
 	require.False(t, submitContext.Writer.Written())
 
 	presentTaskSubmission(submitContext, outcome)

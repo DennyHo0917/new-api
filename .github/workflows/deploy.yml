@@ -92,8 +92,37 @@ jobs:
             value="$(printf '%s' "$encoded" | base64 -d)"
             export "${name%_B64}=$value"
           done < "$RUNTIME_PATH"
-          /data/api-route/deploy.sh
+          rollback_image=""
+          rollback_backend() {
+            [ -n "$rollback_image" ] || return 1
+            docker image tag api-route-backend:rollback api-route-backend:latest
+            cd /data/api-route
+            docker compose up -d --no-deps --force-recreate new-api
+            for i in {1..30}; do
+              if curl -fsS http://127.0.0.1:3000/api/status >/dev/null; then
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+          if docker inspect api-route >/dev/null 2>&1; then
+            rollback_image="$(docker inspect -f '{{.Image}}' api-route)"
+            docker image tag "$rollback_image" api-route-backend:rollback
+          fi
+          if ! /data/api-route/deploy.sh; then
+            rollback_backend || true
+            exit 1
+          fi
           docker cp "$RUNTIME_PATH" api-route:/data/.env.runtime
           docker exec api-route chmod 600 /data/.env.runtime
           docker restart api-route
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/status >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          rollback_backend || true
+          exit 1
           REMOTE

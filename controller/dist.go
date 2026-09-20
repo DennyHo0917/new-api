@@ -26,7 +26,7 @@ import (
 
 // DistGetSiteInfo handles GET /api/dist/site/info
 func DistGetSiteInfo(c *gin.Context) {
-	cryptoCfg := operation_setting.GetCryptoSetting()
+	cryptoEnabled := isCryptoTopUpEnabled()
 	stripeEnabled := isStripeTopUpEnabled()
 	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
 
@@ -49,7 +49,7 @@ func DistGetSiteInfo(c *gin.Context) {
 			"theme_template":      "claude",
 			"enable_topup":        true,
 			"enable_online_topup": isEpayTopUpEnabled(),
-			"enable_crypto_topup": cryptoCfg.EnableCrypto,
+			"enable_crypto_topup": cryptoEnabled,
 			"enable_stripe_topup": stripeEnabled,
 			"enable_creem_topup":  false,
 			"allow_sub_dist":      false,
@@ -225,10 +225,11 @@ func DistGetSubDistributorInfo(c *gin.Context) {
 // DistGetTopupInfo handles GET /api/dist/topup/info
 func DistGetTopupInfo(c *gin.Context) {
 	cryptoCfg := operation_setting.GetCryptoSetting()
+	cryptoEnabled := isCryptoTopUpEnabled()
 	stripeEnabled := isStripeTopUpEnabled()
 	epayEnabled := isEpayTopUpEnabled()
 	payMethods := make([]gin.H, 0, len(operation_setting.PayMethods)+2)
-	if cryptoCfg.EnableCrypto {
+	if cryptoEnabled {
 		payMethods = append(payMethods, gin.H{
 			"name": "加密货币充值 (Arbitrum One / TRC20)",
 			"type": "crypto",
@@ -257,7 +258,7 @@ func DistGetTopupInfo(c *gin.Context) {
 		"data": gin.H{
 			"min_topup":             cryptoCfg.CryptoMinTopUp,
 			"enable_online_topup":   epayEnabled,
-			"enable_crypto_topup":   cryptoCfg.EnableCrypto,
+			"enable_crypto_topup":   cryptoEnabled,
 			"enable_stripe_topup":   stripeEnabled,
 			"enable_creem_topup":    false,
 			"crypto_expiry_minutes": operation_setting.CryptoOrderExpiryMinutes,

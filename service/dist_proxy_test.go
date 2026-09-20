@@ -22,6 +22,34 @@ func resetSubRouterProxy() {
 	subRouterProxy = nil
 }
 
+func setupDistProxyTestDB(t *testing.T) {
+	t.Helper()
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousSQLitePath := common.SQLitePath
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	previousSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
+
+	common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	require.NoError(t, os.Setenv("SQL_DSN", "local"))
+	require.NoError(t, model.InitDB())
+	testDB := model.DB
+
+	t.Cleanup(func() {
+		if sqlDB, err := testDB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SQLitePath = previousSQLitePath
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		if hadSQLDSN {
+			_ = os.Setenv("SQL_DSN", previousSQLDSN)
+		} else {
+			_ = os.Unsetenv("SQL_DSN")
+		}
+	})
+}
+
 type closeNotifyingRecorder struct {
 	*httptest.ResponseRecorder
 	closed chan bool
@@ -145,19 +173,8 @@ func TestSubRouterReverseProxy_QuotaInterception(t *testing.T) {
 }
 
 func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
-	// Initialize test database
-	common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-	require.NoError(t, os.Setenv("SQL_DSN", "local"))
-	require.NoError(t, model.InitDB())
+	setupDistProxyTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.Token{}, &model.UserSession{}))
-
-	defer func() {
-		if sqlDB, err := model.DB.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-		_ = os.Unsetenv("SQL_DSN")
-	}()
 
 	legacySetting := `{"subrouter_id":88}`
 	legacyUser := model.User{Username: "valid_old_user", Password: "", DisplayName: "Old SubRouter User", Email: "olduser@subrouter.ai", Status: common.UserStatusEnabled, Quota: 0, Setting: legacySetting, AffCode: "legacy01"}
@@ -298,19 +315,8 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 }
 
 func TestSyncCustomersFromRecords(t *testing.T) {
-	// Initialize test database
-	common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-	require.NoError(t, os.Setenv("SQL_DSN", "local"))
-	require.NoError(t, model.InitDB())
+	setupDistProxyTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.User{}))
-
-	defer func() {
-		if sqlDB, err := model.DB.DB(); err == nil {
-			_ = sqlDB.Close()
-		}
-		_ = os.Unsetenv("SQL_DSN")
-	}()
 
 	records := []SubRouterCustomerRecord{
 		{

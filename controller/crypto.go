@@ -40,7 +40,7 @@ func CreateCryptoOrder(c *gin.Context) {
 	}
 
 	cfg := operation_setting.GetCryptoSetting()
-	if !cfg.EnableCrypto {
+	if !isCryptoTopUpEnabled() {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "加密货币充值暂未开放"})
 		return
 	}
@@ -124,6 +124,10 @@ func SubmitCryptoTxHash(c *gin.Context) {
 	userId := c.GetInt("id")
 	if userId <= 0 {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "请先登录"})
+		return
+	}
+	if !isCryptoTopUpEnabled() {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "error", "data": "加密货币充值暂未开放"})
 		return
 	}
 

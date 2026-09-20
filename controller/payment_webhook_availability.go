@@ -11,6 +11,10 @@ func isPaymentComplianceConfirmed() bool {
 	return operation_setting.IsPaymentComplianceConfirmed()
 }
 
+func isCryptoTopUpEnabled() bool {
+	return isPaymentComplianceConfirmed() && operation_setting.GetCryptoSetting().EnableCrypto
+}
+
 func isStripeTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

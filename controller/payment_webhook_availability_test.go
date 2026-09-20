@@ -24,6 +24,30 @@ func confirmPaymentComplianceForTest(t *testing.T) {
 	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
 }
 
+func TestCryptoTopUpEnabledRequiresComplianceAndExplicitEnable(t *testing.T) {
+	paymentSetting := operation_setting.GetPaymentSetting()
+	cryptoSetting := operation_setting.GetCryptoSetting()
+	originalConfirmed := paymentSetting.ComplianceConfirmed
+	originalTermsVersion := paymentSetting.ComplianceTermsVersion
+	originalCryptoEnabled := cryptoSetting.EnableCrypto
+	t.Cleanup(func() {
+		paymentSetting.ComplianceConfirmed = originalConfirmed
+		paymentSetting.ComplianceTermsVersion = originalTermsVersion
+		cryptoSetting.EnableCrypto = originalCryptoEnabled
+	})
+
+	cryptoSetting.EnableCrypto = true
+	paymentSetting.ComplianceConfirmed = false
+	require.False(t, isCryptoTopUpEnabled())
+
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	require.True(t, isCryptoTopUpEnabled())
+
+	cryptoSetting.EnableCrypto = false
+	require.False(t, isCryptoTopUpEnabled())
+}
+
 func TestStripeWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	originalAPISecret := setting.StripeApiSecret

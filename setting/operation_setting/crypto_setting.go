@@ -24,7 +24,7 @@ const (
 )
 
 var cryptoSetting = CryptoSetting{
-	EnableCrypto:        true,
+	EnableCrypto:        false,
 	CryptoExpiryMinutes: CryptoOrderExpiryMinutes,
 	CryptoMinTopUp:      5.0,
 	CryptoWallets: map[string]string{
