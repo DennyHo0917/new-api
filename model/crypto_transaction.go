@@ -144,7 +144,9 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 	cleanHash := strings.TrimSpace(txHash)
 	now := time.Now().Unix()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
+	var completed bool
+	var topUpRecord TopUp
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order CryptoTransaction
 		err := lockForUpdate(tx).Where("trade_no = ?", tradeNo).First(&order).Error
 		if err != nil {
@@ -186,7 +188,7 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 			return err
 		}
 
-		topUpRecord := TopUp{
+		topUpRecord = TopUp{
 			UserId:          order.UserId,
 			Amount:          quotaAmount,
 			Money:           actualAmount,
@@ -201,8 +203,16 @@ func CompleteCryptoTransaction(tradeNo string, actualAmount float64, quotaAmount
 			return fmt.Errorf("failed to record topup history: %w", err)
 		}
 
-		return settlePaidTopUp(tx, &topUpRecord, int(quotaAmount), nil)
+		if err := settlePaidTopUp(tx, &topUpRecord, int(quotaAmount), nil); err != nil {
+			return err
+		}
+		completed = true
+		return nil
 	})
+	if err == nil && completed {
+		notifyTopUpSuccess(&topUpRecord, int(quotaAmount))
+	}
+	return err
 }
 
 func FailCryptoTransaction(tradeNo string, reason string) error {

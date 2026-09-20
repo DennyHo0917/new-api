@@ -1,6 +1,8 @@
 package model
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -238,6 +240,40 @@ func TestRechargeEpayCreditsQuotaExactlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, alreadyDone)
 	assert.Equal(t, 2*500000, getUserQuotaForPaymentGuardTest(t, user.Id))
+}
+
+func TestRechargeEpayNotifiesWeComExactlyOnce(t *testing.T) {
+	truncateTables(t)
+	var messages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Markdown struct {
+				Content string `json:"content"`
+			} `json:"markdown"`
+		}
+		require.NoError(t, common.DecodeJson(r.Body, &payload))
+		messages = append(messages, payload.Markdown.Content)
+		_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+	}))
+	defer server.Close()
+	t.Setenv(weComRechargeWebhookEnv, server.URL)
+
+	user := insertUserForPaymentGuardTest(t, 111, 0)
+	order := createEpayTestOrder(t, user.Id, "EPAYTESTWECOM", PaymentProviderEpay, common.TopUpStatusPending)
+	order.Amount = 10
+	order.Money = 72
+	require.NoError(t, DB.Save(&order).Error)
+
+	alreadyDone, err := RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	alreadyDone, err = RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
+	require.Len(t, messages, 1)
+	assert.Contains(t, messages[0], "用户名：payment_guard_user")
+	assert.Contains(t, messages[0], "充值金额：$10.00")
+	assert.Contains(t, messages[0], "充值渠道：alipay (epay)")
 }
 
 func TestRechargeEpayKeepsRedisAndDatabaseCreditInSync(t *testing.T) {
