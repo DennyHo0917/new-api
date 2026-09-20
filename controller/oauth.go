@@ -64,6 +64,14 @@ func GenerateOAuthCode(c *gin.Context) {
 	userID := 0
 	sessionID := ""
 	flowPayload := oauthFlowPayload{AffiliateCode: request.Aff}
+	if _, ok := distOAuthProviders[request.Provider]; ok && request.Provider != "telegram" {
+		verifier, err := newOAuthPKCEVerifier()
+		if err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
+		flowPayload.CodeVerifier = verifier
+	}
 	bindingStarted := false
 	if request.Provider == "telegram" {
 		telegramFlow, err := oauth.NewTelegramOAuthFlow()
@@ -135,6 +143,13 @@ func GenerateOAuthCode(c *gin.Context) {
 	data := gin.H{"flow_token": state, "expires_at": expiresAt.Unix()}
 	if flowPayload.Telegram != nil {
 		data["authorization_url"] = flowPayload.Telegram.AuthorizationURL(state)
+	} else if flowPayload.CodeVerifier != "" {
+		authorizationURL, err := buildDistOAuthAuthorizationURL(request.Provider, oauth.GetProvider(request.Provider), state, flowPayload.CodeVerifier)
+		if err != nil {
+			writeSecurityOperationError(c, err)
+			return
+		}
+		data["authorization_url"] = authorizationURL
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -332,8 +347,13 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 	}
 	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode)
 	if err != nil {
-		if errors.Is(err, model.ErrEmailAlreadyTaken) {
-			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+		var emailAlreadyTaken *OAuthEmailAlreadyTakenError
+		if errors.Is(err, model.ErrEmailAlreadyTaken) || errors.As(err, &emailAlreadyTaken) {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"code":    "OAUTH_ACCOUNT_LINK_REQUIRED",
+				"message": i18n.T(c, i18n.MsgUserEmailAlreadyTaken),
+			})
 			return
 		}
 		switch err.(type) {
@@ -341,8 +361,6 @@ func handleOAuthLogin(c *gin.Context, provider oauth.Provider, oauthUser *oauth.
 			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
 		case *OAuthRegistrationDisabledError:
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
-		case *OAuthEmailAlreadyTakenError:
-			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		default:
 			writeSecurityOperationError(c, err)
 		}

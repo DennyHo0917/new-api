@@ -69,7 +69,7 @@ func SetDistRouter(router *gin.Engine) {
 		distRouter.POST("/user/login", middleware.CriticalRateLimit(), controller.DistLogin)
 		distRouter.POST("/user/logout", controller.DistLogout)
 		distRouter.GET("/oauth/:provider/start", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DistOAuthStart)
-		distRouter.GET("/oauth/:provider/callback", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.DistOAuthCallback)
+		distRouter.GET("/oauth/:provider/callback", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), controller.DistOAuthCallback)
 	}
 
 	// Authenticated routes

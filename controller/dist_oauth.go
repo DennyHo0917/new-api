@@ -36,39 +36,11 @@ func DistOAuthStart(c *gin.Context) {
 		return
 	}
 
-	clientID, authorizationEndpoint, scopes := "", "", ""
-	switch typed := provider.(type) {
-	case *oauth.GitHubProvider:
-		clientID = common.GitHubClientId
-		authorizationEndpoint = "https://github.com/login/oauth/authorize"
-		scopes = "read:user user:email"
-	case *oauth.GenericOAuthProvider:
-		config := typed.GetConfig()
-		clientID = config.ClientId
-		authorizationEndpoint = config.AuthorizationEndpoint
-		scopes = config.Scopes
-	}
-	if clientID == "" || authorizationEndpoint == "" {
-		common.ApiErrorI18n(c, i18n.MsgOAuthNotEnabled, providerParams(provider.GetName()))
-		return
-	}
-
-	serverAddress := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/")
-	redirectURI := serverAddress + "/oauth/" + providerName
-	parsedRedirect, err := url.Parse(redirectURI)
-	if err != nil || parsedRedirect.Host == "" || (parsedRedirect.Scheme != "https" && parsedRedirect.Scheme != "http") {
-		common.ApiErrorI18n(c, i18n.MsgOAuthConnectFailed, providerParams(provider.GetName()))
-		return
-	}
-
-	verifierBytes := make([]byte, 32)
-	if _, err := rand.Read(verifierBytes); err != nil {
+	verifier, err := newOAuthPKCEVerifier()
+	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
 	}
-	verifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
-	challengeBytes := sha256.Sum256([]byte(verifier))
-	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
 
 	affiliateCode := strings.TrimSpace(c.Query("aff"))
 	if len(affiliateCode) > 32 {
@@ -92,23 +64,61 @@ func DistOAuthStart(c *gin.Context) {
 		return
 	}
 
-	authorizeURL, err := url.Parse(authorizationEndpoint)
-	if err != nil || authorizeURL.Scheme != "https" || authorizeURL.Host == "" {
-		writeSecurityOperationError(c, errors.New("invalid OAuth authorization endpoint"))
+	authorizeURL, err := buildDistOAuthAuthorizationURL(providerName, provider, state, verifier)
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgOAuthConnectFailed, providerParams(provider.GetName()))
 		return
 	}
+	c.Redirect(http.StatusFound, authorizeURL)
+}
+
+func DistOAuthCallback(c *gin.Context) {
+	HandleOAuth(c)
+}
+
+func newOAuthPKCEVerifier() (string, error) {
+	verifierBytes := make([]byte, 32)
+	if _, err := rand.Read(verifierBytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(verifierBytes), nil
+}
+
+func buildDistOAuthAuthorizationURL(providerName string, provider oauth.Provider, state, verifier string) (string, error) {
+	clientID, authorizationEndpoint, scopes := "", "", ""
+	switch typed := provider.(type) {
+	case *oauth.GitHubProvider:
+		clientID = common.GitHubClientId
+		authorizationEndpoint = "https://github.com/login/oauth/authorize"
+		scopes = "read:user user:email"
+	case *oauth.GenericOAuthProvider:
+		config := typed.GetConfig()
+		clientID = config.ClientId
+		authorizationEndpoint = config.AuthorizationEndpoint
+		scopes = config.Scopes
+	}
+	if clientID == "" || authorizationEndpoint == "" {
+		return "", errors.New("OAuth provider is not configured")
+	}
+
+	redirectURI := strings.TrimRight(strings.TrimSpace(system_setting.ServerAddress), "/") + "/oauth/" + providerName
+	parsedRedirect, err := url.Parse(redirectURI)
+	if err != nil || parsedRedirect.Host == "" || (parsedRedirect.Scheme != "https" && parsedRedirect.Scheme != "http") {
+		return "", errors.New("invalid OAuth redirect URI")
+	}
+	authorizeURL, err := url.Parse(authorizationEndpoint)
+	if err != nil || authorizeURL.Scheme != "https" || authorizeURL.Host == "" {
+		return "", errors.New("invalid OAuth authorization endpoint")
+	}
+	challengeBytes := sha256.Sum256([]byte(verifier))
 	query := authorizeURL.Query()
 	query.Set("client_id", clientID)
 	query.Set("redirect_uri", redirectURI)
 	query.Set("response_type", "code")
 	query.Set("scope", scopes)
 	query.Set("state", state)
-	query.Set("code_challenge", challenge)
+	query.Set("code_challenge", base64.RawURLEncoding.EncodeToString(challengeBytes[:]))
 	query.Set("code_challenge_method", "S256")
 	authorizeURL.RawQuery = query.Encode()
-	c.Redirect(http.StatusFound, authorizeURL.String())
-}
-
-func DistOAuthCallback(c *gin.Context) {
-	HandleOAuth(c)
+	return authorizeURL.String(), nil
 }

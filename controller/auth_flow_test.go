@@ -662,6 +662,7 @@ func TestSecurityLoginRequiresConfiguredFactors(t *testing.T) {
 type authFlowTestOAuthProvider struct {
 	exchangeErr   error
 	userInfoErr   error
+	userInfo      *oauth.OAuthUser
 	exchangeCalls int
 	userInfoCalls int
 }
@@ -679,6 +680,9 @@ func (provider *authFlowTestOAuthProvider) GetUserInfo(context.Context, *oauth.O
 	provider.userInfoCalls++
 	if provider.userInfoErr != nil {
 		return nil, provider.userInfoErr
+	}
+	if provider.userInfo != nil {
+		return provider.userInfo, nil
 	}
 	return &oauth.OAuthUser{ProviderUserID: "external-user"}, nil
 }
@@ -785,6 +789,56 @@ func TestDistOAuthStartUsesSingleUseStateAndPKCE(t *testing.T) {
 	assert.Equal(t, base64.RawURLEncoding.EncodeToString(challenge[:]), query.Get("code_challenge"))
 }
 
+func TestGenerateOAuthCodeReturnsSessionBoundPKCEBindingURL(t *testing.T) {
+	_, identity := setupSecurityEnrollmentTest(t)
+	previousAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://www.api-route.com"
+	t.Cleanup(func() { system_setting.ServerAddress = previousAddress })
+
+	provider := oauth.NewGenericOAuthProvider(&model.CustomOAuthProvider{
+		Id:                    42,
+		Name:                  "Google",
+		Slug:                  "google",
+		Enabled:               true,
+		ClientId:              "public-client-id",
+		AuthorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+		Scopes:                "openid email profile",
+	})
+	require.NoError(t, oauth.RegisterCustom("google", provider))
+	t.Cleanup(func() { oauth.UnregisterCustomProvider("google") })
+
+	operation := service.VerificationOperation{Scope: service.VerificationScopeAccountBind, Context: []byte(`{"provider":"google"}`)}
+	proof := issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	response := securityEnrollmentRequest(http.MethodPost, "/api/oauth/state", `{"provider":"google","intent":"bind"}`, proof, identity, GenerateOAuthCode)
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			FlowToken        string `json:"flow_token"`
+			AuthorizationURL string `json:"authorization_url"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	authorizeURL, err := url.Parse(result.Data.AuthorizationURL)
+	require.NoError(t, err)
+	query := authorizeURL.Query()
+	assert.Equal(t, result.Data.FlowToken, query.Get("state"))
+	assert.Equal(t, "https://www.api-route.com/oauth/google", query.Get("redirect_uri"))
+	assert.Equal(t, "S256", query.Get("code_challenge_method"))
+	require.NotEmpty(t, query.Get("code_challenge"))
+
+	flow, err := model.GetAuthFlow(result.Data.FlowToken, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "google", Intent: model.AuthFlowIntentBind,
+		UserId: identity.UserID, SessionId: identity.SessionID,
+	})
+	require.NoError(t, err)
+	var payload oauthFlowPayload
+	require.NoError(t, common.UnmarshalJsonStr(flow.Payload, &payload))
+	require.NotEmpty(t, payload.CodeVerifier)
+	challenge := sha256.Sum256([]byte(payload.CodeVerifier))
+	assert.Equal(t, base64.RawURLEncoding.EncodeToString(challenge[:]), query.Get("code_challenge"))
+}
+
 func TestGenerateOAuthCodeBindsFlowToAuthenticatedSession(t *testing.T) {
 	_, identity := setupSecurityEnrollmentTest(t)
 	oauth.Register("auth-flow-test", &authFlowTestOAuthProvider{})
@@ -873,6 +927,35 @@ func TestOAuthLoginConsumesFlowAfterProviderIdentityAndOnProviderError(t *testin
 	assert.ErrorIs(t, err, model.ErrAuthFlowConsumed)
 	assert.Equal(t, 1, provider.exchangeCalls)
 	assert.Equal(t, 1, provider.userInfoCalls)
+}
+
+func TestOAuthLoginEmailCollisionOffersSecureAccountLinking(t *testing.T) {
+	provider := setupAuthFlowControllerTest(t)
+	provider.userInfo = &oauth.OAuthUser{ProviderUserID: "external-user", Email: "existing@example.com"}
+	require.NoError(t, model.DB.Create(&model.User{
+		Username: "existing", Password: "password-hash", DisplayName: "Existing",
+		Email: "existing@example.com", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+	}).Error)
+	token, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "auth-flow-test", Intent: model.AuthFlowIntentLogin,
+		Payload: `{}`, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.GET("/api/oauth/:provider", HandleOAuth)
+	request := httptest.NewRequest(http.MethodGet, "/api/oauth/auth-flow-test?state="+token+"&code=test", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    string `json:"code"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	assert.False(t, result.Success)
+	assert.Equal(t, "OAUTH_ACCOUNT_LINK_REQUIRED", result.Code)
+	assert.NotContains(t, response.Body.String(), "existing@example.com")
 }
 
 func TestOAuthBindProviderErrorConsumesSessionBoundFlow(t *testing.T) {
