@@ -88,6 +88,30 @@ func getUserQuotaForPaymentGuardTest(t *testing.T, userID int) int {
 	return user.Quota
 }
 
+func TestAdminTopUpsIncludeUserIdentity(t *testing.T) {
+	truncateTables(t)
+	user := insertUserForPaymentGuardTest(t, 160, 0)
+	user.Email = "topup-user@example.com"
+	require.NoError(t, DB.Save(user).Error)
+	insertTopUpForPaymentGuardTest(t, "TOPUP-WITH-USER", user.Id, PaymentProviderStripe)
+
+	for _, load := range []func() ([]*AdminTopUp, int64, error){
+		func() ([]*AdminTopUp, int64, error) {
+			return GetAllTopUps(&common.PageInfo{Page: 1, PageSize: 20})
+		},
+		func() ([]*AdminTopUp, int64, error) {
+			return SearchAllTopUps("TOPUP-WITH-USER", &common.PageInfo{Page: 1, PageSize: 20})
+		},
+	} {
+		topUps, total, err := load()
+		require.NoError(t, err)
+		require.Equal(t, int64(1), total)
+		require.Len(t, topUps, 1)
+		assert.Equal(t, user.Username, topUps[0].Username)
+		assert.Equal(t, user.Email, topUps[0].Email)
+	}
+}
+
 func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	truncateTables(t)
 

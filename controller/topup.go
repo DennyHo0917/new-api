@@ -545,7 +545,7 @@ func GetAllTopUps(c *gin.Context) {
 	keyword := c.Query("keyword")
 
 	var (
-		topups []*model.TopUp
+		topups []*model.AdminTopUp
 		total  int64
 		err    error
 	)
