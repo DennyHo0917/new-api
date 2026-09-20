@@ -29,9 +29,14 @@ func setupDistProxyTestDB(t *testing.T) {
 	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
 	previousSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
 
-	common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-	require.NoError(t, os.Setenv("SQL_DSN", "local"))
+	if postgresDSN := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN")); postgresDSN != "" {
+		common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+		require.NoError(t, os.Setenv("SQL_DSN", postgresDSN))
+	} else {
+		common.SQLitePath = fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+		common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+		require.NoError(t, os.Setenv("SQL_DSN", "local"))
+	}
 	require.NoError(t, model.InitDB())
 	testDB := model.DB
 
@@ -215,6 +220,14 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 						}
 					}
 				}`))
+			} else if strings.Contains(string(body), "new_old_user") && strings.Contains(string(body), "secret_pass_123") {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "new_upstream_sess", Path: "/"})
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"id":92,"username":"new_old_user","display_name":"New Old User","email":"new-old@example.com"}}`))
+			} else if strings.Contains(string(body), "new_token_failure_user") {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "new_token_failure", Path: "/"})
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"user":{"id":93,"username":"new_token_failure_user","email":"new-token-failure@example.com"}}}`))
 			} else if strings.Contains(string(body), "token_failure_user") {
 				http.SetCookie(w, &http.Cookie{Name: "session", Value: "token_failure", Path: "/"})
 				w.Header().Set("Content-Type", "application/json")
@@ -226,17 +239,21 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 		case "/api/dist/token/list", "/api/token/list":
 			tokenRequests++
 			cookie, err := r.Cookie("session")
-			if err != nil || cookie.Value == "token_failure" {
+			if err != nil || cookie.Value == "token_failure" || cookie.Value == "new_token_failure" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"success":false}`))
 				return
 			}
-			if cookie.Value != "upstream_sess_tok" {
+			if cookie.Value != "upstream_sess_tok" && cookie.Value != "new_upstream_sess" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
+			if cookie.Value == "new_upstream_sess" {
+				_, _ = w.Write([]byte(`{"success":true,"data":[{"id":102,"name":"New Historical Key","key":"sk-newsuboldkey1234567890abcdef","status":1,"unlimited_quota":true,"created_time":1700000001}]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{
 				"success": true,
 				"data": [
@@ -262,19 +279,25 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 		_ = os.Unsetenv("SUBROUTER_BASE_URL")
 	}()
 
-	// Accounts that are absent, unmarked, or already migrated must never reach upstream.
-	_, err = AuthenticateAndMigrateSubRouterUser("absent_user", "irrelevant_password")
-	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
+	// Existing unmarked or already migrated accounts must never reach upstream.
 	_, err = AuthenticateAndMigrateSubRouterUser("unmarked_user", "irrelevant_password")
 	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
 	_, err = AuthenticateAndMigrateSubRouterUser("already_migrated", "wrong_password")
 	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
 	assert.Equal(t, 0, loginRequests)
 
-	// An eligible legacy account may reach upstream, but bad credentials do not migrate it.
+	// Unknown and eligible placeholder accounts may reach upstream, but bad
+	// credentials do not create or modify a local account.
+	_, err = AuthenticateAndMigrateSubRouterUser("absent_user", "irrelevant_password")
+	require.ErrorIs(t, err, ErrSubRouterAuthFailed)
+	var absentCount int64
+	require.NoError(t, model.DB.Model(&model.User{}).Where("username = ?", "absent_user").Count(&absentCount).Error)
+	assert.Zero(t, absentCount)
+	assert.Equal(t, 1, loginRequests)
+
 	_, err = AuthenticateAndMigrateSubRouterUser("wrong_user", "wrong_pass")
 	require.ErrorIs(t, err, ErrSubRouterAuthFailed)
-	assert.Equal(t, 1, loginRequests)
+	assert.Equal(t, 2, loginRequests)
 
 	// Successful upstream login carries its session cookie to the key-list request.
 	user, err := AuthenticateAndMigrateSubRouterUser("valid_old_user", "secret_pass_123")
@@ -294,13 +317,13 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.Equal(t, "Historical Project Key", token.Name)
 	assert.Equal(t, user.Id, token.UserId)
 	assert.Equal(t, "subrouter", token.Group, "Migrated token must have group tagged as subrouter")
-	assert.Equal(t, 2, loginRequests)
+	assert.Equal(t, 3, loginRequests)
 	assert.Equal(t, 1, tokenRequests)
 
 	// Once the password is present, another migration attempt cannot call or overwrite upstream.
 	_, err = AuthenticateAndMigrateSubRouterUser("valid_old_user", "replacement_password_123")
 	require.ErrorIs(t, err, ErrSubRouterMigrationNotEligible)
-	assert.Equal(t, 2, loginRequests)
+	assert.Equal(t, 3, loginRequests)
 	var persisted model.User
 	require.NoError(t, model.DB.First(&persisted, legacyUser.Id).Error)
 	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", persisted.Password))
@@ -312,6 +335,27 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	persisted = model.User{}
 	require.NoError(t, model.DB.First(&persisted, tokenFailureUser.Id).Error)
 	assert.Empty(t, persisted.Password)
+
+	// A successful upstream login for an unknown legacy user creates one local
+	// zero-quota account and imports its keys in the same transaction.
+	newUser, err := AuthenticateAndMigrateSubRouterUser("new_old_user", "secret_pass_123")
+	require.NoError(t, err)
+	assert.Equal(t, "new_old_user", newUser.Username)
+	assert.Equal(t, "new-old@example.com", newUser.Email)
+	assert.Zero(t, newUser.Quota)
+	assert.True(t, common.ValidatePasswordAndHash("secret_pass_123", newUser.Password))
+	assert.Contains(t, newUser.Setting, `"subrouter_id":92`)
+	newToken, err := model.GetTokenByKey("newsuboldkey1234567890abcdef", true)
+	require.NoError(t, err)
+	assert.Equal(t, newUser.Id, newToken.UserId)
+	assert.Equal(t, model.LegacySubRouterGroup, newToken.Group)
+
+	// Token synchronization failure rolls back on-demand account creation.
+	_, err = AuthenticateAndMigrateSubRouterUser("new_token_failure_user", "secret_pass_123")
+	require.ErrorIs(t, err, ErrSubRouterTokenSyncFailed)
+	var failedCount int64
+	require.NoError(t, model.DB.Model(&model.User{}).Where("username = ?", "new_token_failure_user").Count(&failedCount).Error)
+	assert.Zero(t, failedCount)
 }
 
 func TestSyncCustomersFromRecords(t *testing.T) {

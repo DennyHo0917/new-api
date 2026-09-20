@@ -24,9 +24,17 @@ var (
 )
 
 type subRouterLoginResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    any    `json:"data"`
+	Success bool                       `json:"success"`
+	Message string                     `json:"message"`
+	Data    subRouterLoginResponseData `json:"data"`
+}
+
+type subRouterLoginResponseData struct {
+	Id          int                         `json:"id"`
+	Username    string                      `json:"username"`
+	DisplayName string                      `json:"display_name"`
+	Email       string                      `json:"email"`
+	User        *subRouterLoginResponseData `json:"user"`
 }
 
 type subRouterTokenItem struct {
@@ -46,22 +54,25 @@ type subRouterTokenListResponse struct {
 	Data    []subRouterTokenItem `json:"data"`
 }
 
-// AuthenticateAndMigrateSubRouterUser verifies a pre-synchronized legacy user
-// with upstream SubRouter exactly once, then stores the local password and keys.
+// AuthenticateAndMigrateSubRouterUser verifies a legacy user with upstream
+// SubRouter exactly once, then atomically creates or claims the local account
+// with zero quota and imports its historical keys.
 func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User, error) {
 	var localUser model.User
-	if err := model.DB.Where("username = ? OR email = ?", username, model.NormalizeEmail(username)).First(&localUser).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSubRouterMigrationNotEligible
-		}
-		return nil, fmt.Errorf("load local migration user: %w", err)
+	lookupErr := model.DB.Where("username = ? OR email = ?", username, model.NormalizeEmail(username)).First(&localUser).Error
+	localUserExists := lookupErr == nil
+	if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("load local migration user: %w", lookupErr)
 	}
 
 	var migrationMarker struct {
 		SubRouterID int `json:"subrouter_id"`
 	}
-	if localUser.Status != common.UserStatusEnabled || localUser.Password != "" || common.UnmarshalJsonStr(localUser.Setting, &migrationMarker) != nil || migrationMarker.SubRouterID <= 0 {
+	if localUserExists && (localUser.Status != common.UserStatusEnabled || localUser.Password != "" || common.UnmarshalJsonStr(localUser.Setting, &migrationMarker) != nil || migrationMarker.SubRouterID <= 0) {
 		return nil, ErrSubRouterMigrationNotEligible
+	}
+	if !localUserExists {
+		localUser = model.User{}
 	}
 
 	baseURL := GetSubRouterBaseURL()
@@ -90,7 +101,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		baseURL + "/api/user/login",
 	}
 
-	var loginRespBody []byte
+	var parsedLogin subRouterLoginResponse
 	var loginSuccess bool
 
 	for _, endpoint := range loginEndpoints {
@@ -114,7 +125,7 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 
 		var parsedResp subRouterLoginResponse
 		if unmarshalErr := common.Unmarshal(respBytes, &parsedResp); unmarshalErr == nil && parsedResp.Success {
-			loginRespBody = respBytes
+			parsedLogin = parsedResp
 			loginSuccess = true
 			break
 		}
@@ -124,35 +135,18 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		return nil, ErrSubRouterAuthFailed
 	}
 
-	// Parse user details from SubRouter response
-	displayName := username
-	email := ""
-	var parsedResp subRouterLoginResponse
-	_ = common.Unmarshal(loginRespBody, &parsedResp)
-
-	if dataMap, ok := parsedResp.Data.(map[string]any); ok {
-		if userMap, ok := dataMap["user"].(map[string]any); ok {
-			if u, ok := userMap["username"].(string); ok && u != "" {
-				username = u
-			}
-			if dn, ok := userMap["display_name"].(string); ok && dn != "" {
-				displayName = dn
-			}
-			if em, ok := userMap["email"].(string); ok && em != "" {
-				email = em
-			}
-		} else {
-			if u, ok := dataMap["username"].(string); ok && u != "" {
-				username = u
-			}
-			if dn, ok := dataMap["display_name"].(string); ok && dn != "" {
-				displayName = dn
-			}
-			if em, ok := dataMap["email"].(string); ok && em != "" {
-				email = em
-			}
-		}
+	loginUser := parsedLogin.Data
+	if loginUser.User != nil {
+		loginUser = *loginUser.User
 	}
+	if loginUser.Id <= 0 || (localUserExists && loginUser.Id != migrationMarker.SubRouterID) {
+		return nil, ErrSubRouterMigrationNotEligible
+	}
+	if strings.TrimSpace(loginUser.Username) != "" {
+		username = strings.TrimSpace(loginUser.Username)
+	}
+	displayName := strings.TrimSpace(loginUser.DisplayName)
+	email := model.NormalizeEmail(loginUser.Email)
 
 	// 2. Fetch historical API keys before completing password migration. If this
 	// fails, the account remains eligible for a later retry instead of losing keys.
@@ -198,22 +192,56 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		return nil, err
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
-		updates := map[string]any{"password": hashedPassword}
-		if email != "" && localUser.Email == "" {
-			updates["email"] = model.NormalizeEmail(email)
-		}
-		if displayName != "" && localUser.DisplayName == "" {
-			updates["display_name"] = displayName
-		}
-		result := tx.Model(&model.User{}).Where("id = ? AND password = ?", localUser.Id, "").Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrSubRouterMigrationNotEligible
-		}
-		if _, err := model.IncrementUserAuthVersionWithTx(tx, localUser.Id); err != nil {
-			return err
+		if localUserExists {
+			updates := map[string]any{"password": hashedPassword}
+			if email != "" && localUser.Email == "" {
+				updates["email"] = email
+			}
+			if displayName != "" && localUser.DisplayName == "" {
+				updates["display_name"] = displayName
+			}
+			result := tx.Model(&model.User{}).Where("id = ? AND password = ?", localUser.Id, "").Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrSubRouterMigrationNotEligible
+			}
+			if _, err := model.IncrementUserAuthVersionWithTx(tx, localUser.Id); err != nil {
+				return err
+			}
+		} else {
+			var conflictCount int64
+			conflicts := tx.Unscoped().Model(&model.User{}).Where("username = ?", username)
+			if email != "" {
+				conflicts = conflicts.Or("LOWER(email) = ?", email)
+			}
+			if err := conflicts.Count(&conflictCount).Error; err != nil {
+				return err
+			}
+			if conflictCount > 0 {
+				return ErrSubRouterMigrationNotEligible
+			}
+			setting, err := common.Marshal(map[string]int{"subrouter_id": loginUser.Id})
+			if err != nil {
+				return err
+			}
+			localUser = model.User{
+				Username:    username,
+				Password:    hashedPassword,
+				DisplayName: displayName,
+				Email:       email,
+				Role:        common.RoleCommonUser,
+				Status:      common.UserStatusEnabled,
+				Quota:       0,
+				Group:       "default",
+				AffCode:     common.GetRandomString(8),
+				Setting:     string(setting),
+				Remark:      fmt.Sprintf("SubRouter ID: %d", loginUser.Id),
+			}
+			if err := tx.Create(&localUser).Error; err != nil {
+				return err
+			}
 		}
 
 		for _, token := range historicalTokens {
@@ -265,12 +293,14 @@ func AuthenticateAndMigrateSubRouterUser(username, password string) (*model.User
 		return nil, err
 	}
 
-	localUser.Password = hashedPassword
-	if email != "" && localUser.Email == "" {
-		localUser.Email = model.NormalizeEmail(email)
-	}
-	if displayName != "" && localUser.DisplayName == "" {
-		localUser.DisplayName = displayName
+	if localUserExists {
+		localUser.Password = hashedPassword
+		if email != "" && localUser.Email == "" {
+			localUser.Email = email
+		}
+		if displayName != "" && localUser.DisplayName == "" {
+			localUser.DisplayName = displayName
+		}
 	}
 	if err := model.PublishUserAuthCache(localUser.Id); err != nil {
 		return nil, err
