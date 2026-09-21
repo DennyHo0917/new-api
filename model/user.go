@@ -110,6 +110,7 @@ type User struct {
 	AffCode              string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount             int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
 	AffCommissionRateBps *int                       `json:"aff_commission_rate_bps" gorm:"type:int;column:aff_commission_rate_bps"`
+	EffectiveAffRateBps  int                        `json:"effective_aff_commission_rate_bps" gorm:"-"`
 	AffQuota             int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota      int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	InviterId            int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
@@ -505,7 +506,7 @@ func GetAllUsers(pageInfo *common.PageInfo, sortOptions ...UserSortOptions) (use
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err = attachGoogleIDs(tx, users); err != nil {
+	if err = attachAdminUserDetails(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -578,7 +579,7 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 		tx.Rollback()
 		return nil, 0, err
 	}
-	if err = attachGoogleIDs(tx, users); err != nil {
+	if err = attachAdminUserDetails(tx, users); err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -591,7 +592,7 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	return users, total, nil
 }
 
-func attachGoogleIDs(tx *gorm.DB, users []*User) error {
+func attachAdminUserDetails(tx *gorm.DB, users []*User) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -616,6 +617,7 @@ func attachGoogleIDs(tx *gorm.DB, users []*User) error {
 	}
 	for _, user := range users {
 		user.GoogleId = byUserID[user.Id]
+		user.EffectiveAffRateBps = EffectiveAffiliateCommissionRateBps(user)
 	}
 	return nil
 }
