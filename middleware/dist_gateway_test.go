@@ -10,7 +10,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,6 +165,17 @@ func TestDistDualTrackGateway(t *testing.T) {
 
 	// Case E: Explicit upstream exhaustion clears only display-only legacy
 	// balance; the user's local spendable quota is unchanged.
+	redisServer := miniredis.RunT(t)
+	oldRDB := common.RDB
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	common.RedisEnabled = true
+	defer func() {
+		_ = common.RDB.Close()
+		common.RDB = oldRDB
+	}()
+	_, err = model.GetTokenByKey(migratedToken.Key, false)
+	require.NoError(t, err)
+
 	reqE := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqE.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
 	reqE.Header.Set("X-Test-Upstream", "exhausted")
@@ -175,4 +188,13 @@ func TestDistDualTrackGateway(t *testing.T) {
 	require.NoError(t, model.DB.First(&reloadedUser, migratedUser.Id).Error)
 	assert.Equal(t, 123456, reloadedUser.Quota)
 	assert.Zero(t, reloadedUser.LegacySubRouterQuota())
+
+	// Case F: the exhausted marker must be visible immediately even when the
+	// legacy token had already been cached in Redis.
+	reqF := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	reqF.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
+	recF := newDistRecorder()
+	router.ServeHTTP(recF, reqF)
+	assert.Equal(t, http.StatusOK, recF.Code)
+	assert.Contains(t, recF.Body.String(), "local_new_api")
 }

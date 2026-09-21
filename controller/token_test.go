@@ -426,7 +426,14 @@ func TestDistCreateTokenDefaultsToUserQuota(t *testing.T) {
 
 func TestDistCreateTokenPreservesExplicitQuotaLimit(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
-	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/dist/token/create", map[string]any{"name": "Limited", "unlimited_quota": false, "remain_quota": 25}, 19)
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/dist/token/create", map[string]any{
+		"name":                 "Limited",
+		"unlimited_quota":      false,
+		"remain_quota":         25,
+		"model_limits":         "gpt-5,claude-sonnet",
+		"model_limits_enabled": true,
+		"allow_ips":            "127.0.0.1",
+	}, 19)
 
 	DistCreateToken(ctx)
 
@@ -436,6 +443,39 @@ func TestDistCreateTokenPreservesExplicitQuotaLimit(t *testing.T) {
 	require.NoError(t, db.Where("user_id = ?", 19).First(&token).Error)
 	assert.False(t, token.UnlimitedQuota)
 	assert.Equal(t, 25, token.RemainQuota)
+	assert.True(t, token.ModelLimitsEnabled)
+	assert.Equal(t, "gpt-5,claude-sonnet", token.ModelLimits)
+	require.NotNil(t, token.AllowIps)
+	assert.Equal(t, "127.0.0.1", *token.AllowIps)
+
+	updateCtx, updateRecorder := newAuthenticatedContext(t, http.MethodPut, "/api/dist/token/"+strconv.Itoa(token.Id), map[string]any{
+		"model_limits":         "gpt-5.1",
+		"model_limits_enabled": true,
+		"allow_ips":            "198.51.100.0/24",
+	}, 19)
+	updateCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	DistUpdateToken(updateCtx)
+	require.True(t, decodeAPIResponse(t, updateRecorder).Success)
+
+	require.NoError(t, db.First(&token, token.Id).Error)
+	assert.Equal(t, "gpt-5.1", token.ModelLimits)
+	require.NotNil(t, token.AllowIps)
+	assert.Equal(t, "198.51.100.0/24", *token.AllowIps)
+
+	listCtx, listRecorder := newAuthenticatedContext(t, http.MethodGet, "/api/dist/token/list", nil, 19)
+	DistGetTokens(listCtx)
+	listResponse := decodeAPIResponse(t, listRecorder)
+	require.True(t, listResponse.Success)
+	var items []struct {
+		ModelLimits        string `json:"model_limits"`
+		ModelLimitsEnabled bool   `json:"model_limits_enabled"`
+		AllowIps           string `json:"allow_ips"`
+	}
+	require.NoError(t, common.Unmarshal(listResponse.Data, &items))
+	require.Len(t, items, 1)
+	assert.Equal(t, "gpt-5.1", items[0].ModelLimits)
+	assert.True(t, items[0].ModelLimitsEnabled)
+	assert.Equal(t, "198.51.100.0/24", items[0].AllowIps)
 }
 
 func TestTokenMigrationFromChar48ToVarchar128(t *testing.T) {

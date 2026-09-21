@@ -75,6 +75,36 @@ func TestHardDeleteUserFailsClosedWhenAuthFenceCannotPublish(t *testing.T) {
 	}
 }
 
+func TestMarkLegacySubRouterTokenExhaustedFailsClosedWhenCacheInvalidationFails(t *testing.T) {
+	truncateTables(t)
+
+	setting, err := MergeLegacySubRouterSetting("", 42, 5000, common.GetTimestamp())
+	require.NoError(t, err)
+	user := User{Username: "legacy-cache-failure", Password: "password", Setting: setting}
+	require.NoError(t, DB.Create(&user).Error)
+	token := Token{UserId: user.Id, Key: "legacy-cache-failure-token", Group: LegacySubRouterGroup}
+	require.NoError(t, DB.Create(&token).Error)
+
+	oldRedisEnabled, oldRDB := common.RedisEnabled, common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("forced redis failure")
+		},
+		MaxRetries: -1,
+	})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled, common.RDB = oldRedisEnabled, oldRDB
+	})
+
+	require.Error(t, MarkLegacySubRouterTokenExhausted(token.Id))
+	require.NoError(t, DB.First(&token, token.Id).Error)
+	assert.Equal(t, LegacySubRouterGroup, token.Group)
+	require.NoError(t, DB.First(&user, user.Id).Error)
+	assert.EqualValues(t, 5000, user.LegacySubRouterQuota())
+}
+
 func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.T) {
 	truncateTables(t)
 	server := useUserCacheMiniRedis(t)

@@ -52,6 +52,13 @@ func MarkLegacySubRouterTokenExhausted(tokenID int) error {
 	if tokenID <= 0 {
 		return errors.New("invalid token id")
 	}
+	var current Token
+	if err := DB.Select("id", "key").First(&current, tokenID).Error; err != nil {
+		return err
+	}
+	if err := invalidateTokenCacheForMutation(current.Key); err != nil {
+		return fmt.Errorf("invalidate legacy token cache: %w", err)
+	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var token Token
 		if err := tx.Select("id", "user_id", "group").First(&token, tokenID).Error; err != nil {

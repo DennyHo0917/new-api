@@ -563,33 +563,41 @@ func DistGetTokens(c *gin.Context) {
 	}
 
 	type DistTokenItem struct {
-		Id             int    `json:"id"`
-		Name           string `json:"name"`
-		Key            string `json:"key"`
-		Status         int    `json:"status"`
-		RemainQuota    int64  `json:"remain_quota"`
-		UnlimitedQuota bool   `json:"unlimited_quota"`
-		CreatedTime    int64  `json:"created_time"`
-		AccessedTime   int64  `json:"accessed_time"`
-		ExpiredTime    int64  `json:"expired_time"`
-		Models         string `json:"models"`
-		Group          string `json:"group"`
+		Id                 int    `json:"id"`
+		Name               string `json:"name"`
+		Key                string `json:"key"`
+		Status             int    `json:"status"`
+		RemainQuota        int64  `json:"remain_quota"`
+		UnlimitedQuota     bool   `json:"unlimited_quota"`
+		CreatedTime        int64  `json:"created_time"`
+		AccessedTime       int64  `json:"accessed_time"`
+		ExpiredTime        int64  `json:"expired_time"`
+		ModelLimits        string `json:"model_limits"`
+		ModelLimitsEnabled bool   `json:"model_limits_enabled"`
+		AllowIps           string `json:"allow_ips"`
+		Group              string `json:"group"`
 	}
 
 	items := make([]DistTokenItem, 0, len(tokens))
 	for _, t := range tokens {
+		allowIps := ""
+		if t.AllowIps != nil {
+			allowIps = *t.AllowIps
+		}
 		items = append(items, DistTokenItem{
-			Id:             t.Id,
-			Name:           t.Name,
-			Key:            "sk-" + t.Key,
-			Status:         t.Status,
-			RemainQuota:    int64(t.RemainQuota),
-			UnlimitedQuota: t.UnlimitedQuota,
-			CreatedTime:    t.CreatedTime,
-			AccessedTime:   t.AccessedTime,
-			ExpiredTime:    t.ExpiredTime,
-			Models:         t.ModelLimits,
-			Group:          t.Group,
+			Id:                 t.Id,
+			Name:               t.Name,
+			Key:                "sk-" + t.Key,
+			Status:             t.Status,
+			RemainQuota:        int64(t.RemainQuota),
+			UnlimitedQuota:     t.UnlimitedQuota,
+			CreatedTime:        t.CreatedTime,
+			AccessedTime:       t.AccessedTime,
+			ExpiredTime:        t.ExpiredTime,
+			ModelLimits:        t.ModelLimits,
+			ModelLimitsEnabled: t.ModelLimitsEnabled,
+			AllowIps:           allowIps,
+			Group:              t.Group,
 		})
 	}
 
@@ -608,13 +616,14 @@ func DistCreateToken(c *gin.Context) {
 	}
 
 	var req struct {
-		Name           string `json:"name"`
-		RemainQuota    int64  `json:"remain_quota"`
-		ExpiredTime    int64  `json:"expired_time"`
-		UnlimitedQuota *bool  `json:"unlimited_quota"`
-		Models         string `json:"models"`
-		Group          string `json:"group"`
-		Subnet         string `json:"subnet"`
+		Name               string `json:"name"`
+		RemainQuota        int64  `json:"remain_quota"`
+		ExpiredTime        int64  `json:"expired_time"`
+		UnlimitedQuota     *bool  `json:"unlimited_quota"`
+		ModelLimits        string `json:"model_limits"`
+		ModelLimitsEnabled *bool  `json:"model_limits_enabled"`
+		AllowIps           string `json:"allow_ips"`
+		Group              string `json:"group"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -631,6 +640,11 @@ func DistCreateToken(c *gin.Context) {
 	if req.UnlimitedQuota != nil {
 		unlimitedQuota = *req.UnlimitedQuota
 	}
+	modelLimitsEnabled := strings.TrimSpace(req.ModelLimits) != ""
+	if req.ModelLimitsEnabled != nil {
+		modelLimitsEnabled = *req.ModelLimitsEnabled
+	}
+	allowIps := strings.TrimSpace(req.AllowIps)
 	cleanToken := model.Token{
 		UserId:             userId,
 		Name:               req.Name,
@@ -640,8 +654,9 @@ func DistCreateToken(c *gin.Context) {
 		ExpiredTime:        req.ExpiredTime,
 		RemainQuota:        int(req.RemainQuota),
 		UnlimitedQuota:     unlimitedQuota,
-		ModelLimits:        req.Models,
-		ModelLimitsEnabled: req.Models != "",
+		ModelLimits:        strings.TrimSpace(req.ModelLimits),
+		ModelLimitsEnabled: modelLimitsEnabled,
+		AllowIps:           &allowIps,
 		Group:              strings.TrimSpace(req.Group),
 		Status:             common.TokenStatusEnabled,
 	}
@@ -683,12 +698,15 @@ func DistUpdateToken(c *gin.Context) {
 	}
 
 	var req struct {
-		Name           *string `json:"name"`
-		Status         *int    `json:"status"`
-		RemainQuota    *int64  `json:"remain_quota"`
-		UnlimitedQuota *bool   `json:"unlimited_quota"`
-		ExpiredTime    *int64  `json:"expired_time"`
-		Group          *string `json:"group"`
+		Name               *string `json:"name"`
+		Status             *int    `json:"status"`
+		RemainQuota        *int64  `json:"remain_quota"`
+		UnlimitedQuota     *bool   `json:"unlimited_quota"`
+		ExpiredTime        *int64  `json:"expired_time"`
+		ModelLimits        *string `json:"model_limits"`
+		ModelLimitsEnabled *bool   `json:"model_limits_enabled"`
+		AllowIps           *string `json:"allow_ips"`
+		Group              *string `json:"group"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -710,6 +728,16 @@ func DistUpdateToken(c *gin.Context) {
 	}
 	if req.ExpiredTime != nil {
 		token.ExpiredTime = *req.ExpiredTime
+	}
+	if req.ModelLimits != nil {
+		token.ModelLimits = strings.TrimSpace(*req.ModelLimits)
+	}
+	if req.ModelLimitsEnabled != nil {
+		token.ModelLimitsEnabled = *req.ModelLimitsEnabled
+	}
+	if req.AllowIps != nil {
+		allowIps := strings.TrimSpace(*req.AllowIps)
+		token.AllowIps = &allowIps
 	}
 	if req.Group != nil && strings.TrimSpace(*req.Group) != "" {
 		token.Group = strings.TrimSpace(*req.Group)
