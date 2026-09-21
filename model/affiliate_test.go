@@ -147,6 +147,9 @@ func TestPaidTopUpCreditsAffiliateExactlyOnce(t *testing.T) {
 	enableAffiliatePaymentsForTest(t)
 
 	inviter := createAffiliateTestUser(t, "affiliate-inviter", 0, 20)
+	overrideRateBps := 825
+	inviter.AffCommissionRateBps = &overrideRateBps
+	require.NoError(t, DB.Model(&inviter).Update("aff_commission_rate_bps", overrideRateBps).Error)
 	invitee := createAffiliateTestUser(t, "affiliate-invitee", inviter.Id, 0)
 	topUp := TopUp{
 		UserId:          invitee.Id,
@@ -178,23 +181,23 @@ func TestPaidTopUpCreditsAffiliateExactlyOnce(t *testing.T) {
 	require.NoError(t, DB.First(&inviter, inviter.Id).Error)
 	require.NoError(t, DB.First(&invitee, invitee.Id).Error)
 	assert.Equal(t, 5_000_000, invitee.Quota)
-	assert.Equal(t, 350_000, inviter.AffQuota)
-	assert.Equal(t, 350_000, inviter.AffHistoryQuota)
+	assert.Equal(t, 412_500, inviter.AffQuota)
+	assert.Equal(t, 412_500, inviter.AffHistoryQuota)
 
 	var earnings []AffiliateEarning
 	require.NoError(t, DB.Find(&earnings).Error)
 	require.Len(t, earnings, 1)
 	assert.Equal(t, inviter.Id, earnings[0].InviterId)
 	assert.Equal(t, invitee.Id, earnings[0].InviteeId)
-	assert.Equal(t, 700, earnings[0].CommissionRateBps)
-	assert.Equal(t, int64(350_000), earnings[0].CommissionQuota)
+	assert.Equal(t, 825, earnings[0].CommissionRateBps)
+	assert.Equal(t, int64(412_500), earnings[0].CommissionQuota)
 
 	items, total, err := GetAffiliateEarnings(inviter.Id, &common.PageInfo{Page: 1, PageSize: 20})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	require.Len(t, items, 1)
 	assert.Equal(t, "affiliate-invitee", items[0].Username)
-	assert.Equal(t, 0.07, items[0].CommissionRate)
+	assert.Equal(t, 0.0825, items[0].CommissionRate)
 }
 
 func TestPaidTopUpWithoutInviterHasNoAffiliateEarning(t *testing.T) {

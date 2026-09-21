@@ -526,7 +526,7 @@ func buildSelfUserData(user *model.User) map[string]any {
 		"aff_quota":               user.AffQuota,
 		"aff_history_quota":       user.AffHistoryQuota,
 		"default_commission_rate": model.AffiliateCommissionRate(0),
-		"commission_rate":         model.AffiliateCommissionRate(user.AffCount),
+		"commission_rate":         model.EffectiveAffiliateCommissionRate(user),
 		"inviter_id":              user.InviterId,
 		"linux_do_id":             user.LinuxDOId,
 		"setting":                 user.Setting,
@@ -662,7 +662,10 @@ func GetUserModels(c *gin.Context) {
 
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
+	body, err := c.GetRawData()
+	if err == nil {
+		err = common.Unmarshal(body, &updatedUser)
+	}
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -679,6 +682,18 @@ func UpdateUser(c *gin.Context) {
 	originUser, err := model.GetUserById(updatedUser.Id, false)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	var fields map[string]any
+	if common.Unmarshal(body, &fields) != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if _, ok := fields["aff_commission_rate_bps"]; !ok {
+		updatedUser.AffCommissionRateBps = originUser.AffCommissionRateBps
+	}
+	if updatedUser.AffCommissionRateBps != nil && (*updatedUser.AffCommissionRateBps < 0 || *updatedUser.AffCommissionRateBps > 10000) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
 	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {

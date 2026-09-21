@@ -93,6 +93,57 @@ func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecor
 	return recorder
 }
 
+func performUpdateUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("id", 9999)
+	c.Set("role", common.RoleRootUser)
+	UpdateUser(c)
+	return recorder
+}
+
+func TestUpdateUserCommissionRateOverride(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.User{}))
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = false
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+	require.NoError(t, authz.Init(db))
+	initialRate := 750
+	user := model.User{
+		Username: "commission-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "default", AffCode: "commission-user-aff", AffCommissionRateBps: &initialRate,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	recorder := performUpdateUserRequest(t, fmt.Sprintf(`{"id":%d,"username":"commission-user","group":"default"}`, user.Id))
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&user, user.Id).Error)
+	require.NotNil(t, user.AffCommissionRateBps)
+	assert.Equal(t, 750, *user.AffCommissionRateBps)
+
+	recorder = performUpdateUserRequest(t, fmt.Sprintf(`{"id":%d,"username":"commission-user","group":"default","aff_commission_rate_bps":1250}`, user.Id))
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&user, user.Id).Error)
+	require.NotNil(t, user.AffCommissionRateBps)
+	assert.Equal(t, 1250, *user.AffCommissionRateBps)
+
+	recorder = performUpdateUserRequest(t, fmt.Sprintf(`{"id":%d,"username":"commission-user","group":"default","aff_commission_rate_bps":10001}`, user.Id))
+	require.Contains(t, recorder.Body.String(), `"success":false`)
+	require.NoError(t, db.First(&user, user.Id).Error)
+	require.NotNil(t, user.AffCommissionRateBps)
+	assert.Equal(t, 1250, *user.AffCommissionRateBps)
+
+	recorder = performUpdateUserRequest(t, fmt.Sprintf(`{"id":%d,"username":"commission-user","group":"default","aff_commission_rate_bps":null}`, user.Id))
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.NoError(t, db.First(&user, user.Id).Error)
+	assert.Nil(t, user.AffCommissionRateBps)
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()

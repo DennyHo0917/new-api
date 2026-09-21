@@ -406,7 +406,7 @@ func DistGetUserSelf(c *gin.Context) {
 			"aff_quota":               user.AffQuota,
 			"aff_history_quota":       user.AffHistoryQuota,
 			"default_commission_rate": model.AffiliateCommissionRate(0),
-			"commission_rate":         model.AffiliateCommissionRate(user.AffCount),
+			"commission_rate":         model.EffectiveAffiliateCommissionRate(user),
 		},
 	})
 }

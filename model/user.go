@@ -30,6 +30,7 @@ var userSortColumns = map[string]string{
 	"id":            "id",
 	"username":      "username",
 	"quota":         "quota",
+	"used_quota":    "used_quota",
 	"group":         "group",
 	"created_at":    "created_at",
 	"last_login_at": "last_login_at",
@@ -108,6 +109,7 @@ type User struct {
 	Group                string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
 	AffCode              string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
 	AffCount             int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffCommissionRateBps *int                       `json:"aff_commission_rate_bps" gorm:"type:int;column:aff_commission_rate_bps"`
 	AffQuota             int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota      int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	InviterId            int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
@@ -646,7 +648,7 @@ func GetSelfUserById(id int) (*User, error) {
 		"id", "username", "display_name", "avatar_url", "role", "status", "email",
 		"github_id", "discord_id", "oidc_id", "wechat_id", "telegram_id",
 		"group", "quota", "used_quota", "request_count", "aff_code", "aff_count",
-		"aff_quota", "aff_history", "inviter_id", "linux_do_id", "setting",
+		"aff_commission_rate_bps", "aff_quota", "aff_history", "inviter_id", "linux_do_id", "setting",
 		"stripe_customer", "auth_version",
 		"CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password",
 	}).First(&profile, "id = ?", id).Error
@@ -1014,10 +1016,11 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 
 	newUser := *user
 	updates := map[string]any{
-		"username":     newUser.Username,
-		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
-		"remark":       newUser.Remark,
+		"username":                newUser.Username,
+		"display_name":            newUser.DisplayName,
+		"group":                   newUser.Group,
+		"remark":                  newUser.Remark,
+		"aff_commission_rate_bps": newUser.AffCommissionRateBps,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password

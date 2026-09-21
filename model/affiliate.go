@@ -179,6 +179,20 @@ func AffiliateCommissionRate(inviteCount int) float64 {
 	return float64(AffiliateCommissionRateBps(inviteCount)) / 10000
 }
 
+func EffectiveAffiliateCommissionRateBps(user *User) int {
+	if user != nil && user.AffCommissionRateBps != nil && *user.AffCommissionRateBps >= 0 && *user.AffCommissionRateBps <= 10000 {
+		return *user.AffCommissionRateBps
+	}
+	if user == nil {
+		return DefaultAffiliateCommissionBps
+	}
+	return AffiliateCommissionRateBps(user.AffCount)
+}
+
+func EffectiveAffiliateCommissionRate(user *User) float64 {
+	return float64(EffectiveAffiliateCommissionRateBps(user)) / 10000
+}
+
 func settlePaidTopUp(tx *gorm.DB, topUp *TopUp, creditedQuota int, updates map[string]any) error {
 	if err := creditTopUpQuota(tx, topUp.UserId, creditedQuota, updates); err != nil {
 		return err
@@ -201,7 +215,7 @@ func creditAffiliateCommission(tx *gorm.DB, topUp *TopUp, creditedQuota int) err
 
 	var inviter User
 	if err := lockForUpdate(tx).
-		Select("id", "aff_count", "aff_quota", "aff_history").
+		Select("id", "aff_count", "aff_commission_rate_bps", "aff_quota", "aff_history").
 		First(&inviter, invitee.InviterId).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -209,7 +223,7 @@ func creditAffiliateCommission(tx *gorm.DB, topUp *TopUp, creditedQuota int) err
 		return err
 	}
 
-	rateBps := AffiliateCommissionRateBps(inviter.AffCount)
+	rateBps := EffectiveAffiliateCommissionRateBps(&inviter)
 	commissionQuota, err := common.WalletQuotaFromDecimalStrict(
 		decimal.NewFromInt(int64(creditedQuota)).
 			Mul(decimal.NewFromInt(int64(rateBps))).

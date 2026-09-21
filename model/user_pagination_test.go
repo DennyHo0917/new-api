@@ -65,6 +65,34 @@ func TestSearchUsersSortsBeforePagination(t *testing.T) {
 	assert.Equal(t, []int{21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40}, collectUserIDs(users))
 }
 
+func TestGetAllUsersSortsMoneyColumnsBeforePagination(t *testing.T) {
+	truncateTables(t)
+	insertUsersForPaginationTest(t, 3)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", 1).Updates(map[string]any{"quota": 100, "used_quota": 300}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", 2).Updates(map[string]any{"quota": 300, "used_quota": 100}).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", 3).Updates(map[string]any{"quota": 200, "used_quota": 200}).Error)
+
+	tests := []struct {
+		name      string
+		sortBy    string
+		sortOrder string
+		want      []int
+	}{
+		{name: "balance descending", sortBy: "quota", sortOrder: "desc", want: []int{2, 3, 1}},
+		{name: "balance ascending", sortBy: "quota", sortOrder: "asc", want: []int{1, 3, 2}},
+		{name: "consumed descending", sortBy: "used_quota", sortOrder: "desc", want: []int{1, 3, 2}},
+		{name: "consumed ascending", sortBy: "used_quota", sortOrder: "asc", want: []int{2, 3, 1}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			users, total, err := GetAllUsers(&common.PageInfo{Page: 1, PageSize: 3}, NewUserSortOptions(test.sortBy, test.sortOrder))
+			require.NoError(t, err)
+			assert.Equal(t, int64(3), total)
+			assert.Equal(t, test.want, collectUserIDs(users))
+		})
+	}
+}
+
 func TestGetAllUsersIncludesGoogleIdentity(t *testing.T) {
 	truncateTables(t)
 	insertUsersForPaginationTest(t, 2)
