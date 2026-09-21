@@ -1,5 +1,9 @@
 # API Route 自建后端开发计划与任务清单 (TodoList)
 
+## 2026-09-21 SubRouter 价格同步频率
+
+- [x] 将 SubRouter 上游价格同步由每日调整为每 10 分钟，同时保留 BaseLLM 官方价格每日同步与启动时立即同步；定向价格同步测试与根模块构建通过（2026-09-21）。
+
 ## 2026-09-21 忘记密码业务结果与 Turnstile
 
 - [x] 忘记密码仅在后端明确接受请求后显示“已发送”；分站公开配置提供 Turnstile 开关与站点公钥，前端提交有效 token，并区分业务拒绝与网络失败；不存在邮箱继续返回一致的接受结果。覆盖 Turnstile 关闭、开启后缺少/无效/有效 token，以及前端 `success:false`/缺失结果回归；middleware/controller 定向测试、后端构建、前端认证检查与生产构建通过，本地 `5173` 已连接真实 VPS（生产当前 Turnstile 关闭）。依据 OWASP ASVS 5.0.0 V6.3 与 Forgot Password、Authentication、Session Management Cheat Sheets（2026-09-21）。

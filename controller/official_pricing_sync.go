@@ -17,6 +17,7 @@ import (
 
 const (
 	officialPricingRefreshInterval = 24 * time.Hour
+	upstreamPricingRefreshInterval = 10 * time.Minute
 	officialPricingMaxBytes        = 10 << 20
 	upstreamMediaMarkup            = 1.05
 )
@@ -402,14 +403,20 @@ func StartOfficialPricingRefreshTask() {
 		if err := refreshUpstreamMediaPricing(context.Background()); err != nil {
 			common.SysError(fmt.Sprintf("initial upstream media pricing refresh failed: %v", err))
 		}
-		ticker := time.NewTicker(officialPricingRefreshInterval)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := refreshOfficialPricing(context.Background()); err != nil {
-				common.SysError(fmt.Sprintf("scheduled official pricing refresh failed: %v", err))
-			}
-			if err := refreshUpstreamMediaPricing(context.Background()); err != nil {
-				common.SysError(fmt.Sprintf("scheduled upstream media pricing refresh failed: %v", err))
+		officialTicker := time.NewTicker(officialPricingRefreshInterval)
+		upstreamTicker := time.NewTicker(upstreamPricingRefreshInterval)
+		defer officialTicker.Stop()
+		defer upstreamTicker.Stop()
+		for {
+			select {
+			case <-officialTicker.C:
+				if err := refreshOfficialPricing(context.Background()); err != nil {
+					common.SysError(fmt.Sprintf("scheduled official pricing refresh failed: %v", err))
+				}
+			case <-upstreamTicker.C:
+				if err := refreshUpstreamMediaPricing(context.Background()); err != nil {
+					common.SysError(fmt.Sprintf("scheduled upstream media pricing refresh failed: %v", err))
+				}
 			}
 		}
 	}()
