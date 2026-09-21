@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -81,6 +82,13 @@ func DistDualTrackGateway() gin.HandlerFunc {
 
 		// Legacy keys stay on SubRouter until that upstream explicitly reports
 		// quota exhaustion. This prevents local funds from paying old balances.
+		if model.IsLegacySubRouterExhausted(token) {
+			if err := model.MarkLegacySubRouterTokenExhausted(token.Id); err != nil {
+				common.SysError("failed to activate exhausted legacy token: " + err.Error())
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, "API key migration is temporarily unavailable")
+				return
+			}
+		}
 		if model.IsLegacySubRouterToken(token) && !model.IsLegacySubRouterExhausted(token) {
 			if service.ProxyToSubRouter(c) {
 				if err := model.MarkLegacySubRouterTokenExhausted(token.Id); err != nil {

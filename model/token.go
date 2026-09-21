@@ -41,7 +41,7 @@ func IsLegacySubRouterToken(token *Token) bool {
 	if token == nil {
 		return false
 	}
-	return token.Group == LegacySubRouterGroup || token.Group == LegacySubRouterExhaustedGroup || strings.Contains(strings.ToLower(token.Name), "subrouter")
+	return token.Group == LegacySubRouterGroup || token.Group == LegacySubRouterExhaustedGroup
 }
 
 func IsLegacySubRouterExhausted(token *Token) bool {
@@ -64,12 +64,12 @@ func MarkLegacySubRouterTokenExhausted(tokenID int) error {
 		if err := tx.Select("id", "user_id", "group").First(&token, tokenID).Error; err != nil {
 			return err
 		}
-		if token.Group != LegacySubRouterGroup {
+		if token.Group != LegacySubRouterGroup && token.Group != LegacySubRouterExhaustedGroup {
 			return nil
 		}
 		if err := tx.Model(&Token{}).
-			Where("id = ? AND "+commonGroupCol+" = ?", tokenID, LegacySubRouterGroup).
-			Update("group", LegacySubRouterExhaustedGroup).Error; err != nil {
+			Where("id = ? AND "+commonGroupCol+" IN ?", tokenID, []string{LegacySubRouterGroup, LegacySubRouterExhaustedGroup}).
+			Update("group", "").Error; err != nil {
 			return err
 		}
 		var user User

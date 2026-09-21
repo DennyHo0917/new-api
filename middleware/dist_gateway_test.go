@@ -183,18 +183,35 @@ func TestDistDualTrackGateway(t *testing.T) {
 	router.ServeHTTP(recE, reqE)
 	assert.Equal(t, http.StatusTooManyRequests, recE.Code)
 	require.NoError(t, model.DB.First(&migratedToken, migratedToken.Id).Error)
-	assert.Equal(t, model.LegacySubRouterExhaustedGroup, migratedToken.Group)
+	assert.Empty(t, migratedToken.Group)
 	var reloadedUser model.User
 	require.NoError(t, model.DB.First(&reloadedUser, migratedUser.Id).Error)
 	assert.Equal(t, 123456, reloadedUser.Quota)
 	assert.Zero(t, reloadedUser.LegacySubRouterQuota())
 
-	// Case F: the exhausted marker must be visible immediately even when the
-	// legacy token had already been cached in Redis.
+	// Case F: after exhaustion the unchanged old key must pass the complete
+	// local authentication chain and spend new-site quota.
+	fullRouter := gin.New()
+	fullRouter.Use(DistDualTrackGateway(), TokenAuth())
+	fullRouter.POST("/v1/chat/completions", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"origin": "local_new_api"})
+	})
 	reqF := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	reqF.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
 	recF := newDistRecorder()
-	router.ServeHTTP(recF, reqF)
+	fullRouter.ServeHTTP(recF, reqF)
 	assert.Equal(t, http.StatusOK, recF.Code)
 	assert.Contains(t, recF.Body.String(), "local_new_api")
+
+	// Case G: deployments that already persisted the old exhausted marker are
+	// repaired on first use and keep the same key.
+	migratedToken.Group = model.LegacySubRouterExhaustedGroup
+	require.NoError(t, migratedToken.Update())
+	reqG := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	reqG.Header.Set("Authorization", "Bearer sk-subroutermigratedkey123456789012345678901234")
+	recG := newDistRecorder()
+	fullRouter.ServeHTTP(recG, reqG)
+	assert.Equal(t, http.StatusOK, recG.Code)
+	require.NoError(t, model.DB.First(&migratedToken, migratedToken.Id).Error)
+	assert.Empty(t, migratedToken.Group)
 }

@@ -82,9 +82,6 @@ func TestMarkLegacySubRouterTokenExhaustedFailsClosedWhenCacheInvalidationFails(
 	require.NoError(t, err)
 	user := User{Username: "legacy-cache-failure", Password: "password", Setting: setting}
 	require.NoError(t, DB.Create(&user).Error)
-	token := Token{UserId: user.Id, Key: "legacy-cache-failure-token", Group: LegacySubRouterGroup}
-	require.NoError(t, DB.Create(&token).Error)
-
 	oldRedisEnabled, oldRDB := common.RedisEnabled, common.RDB
 	common.RedisEnabled = true
 	common.RDB = redis.NewClient(&redis.Options{
@@ -98,9 +95,13 @@ func TestMarkLegacySubRouterTokenExhaustedFailsClosedWhenCacheInvalidationFails(
 		common.RedisEnabled, common.RDB = oldRedisEnabled, oldRDB
 	})
 
-	require.Error(t, MarkLegacySubRouterTokenExhausted(token.Id))
-	require.NoError(t, DB.First(&token, token.Id).Error)
-	assert.Equal(t, LegacySubRouterGroup, token.Group)
+	for _, group := range []string{LegacySubRouterGroup, LegacySubRouterExhaustedGroup} {
+		token := Token{UserId: user.Id, Key: "legacy-cache-failure-token-" + group, Group: group}
+		require.NoError(t, DB.Create(&token).Error)
+		require.Error(t, MarkLegacySubRouterTokenExhausted(token.Id))
+		require.NoError(t, DB.First(&token, token.Id).Error)
+		assert.Equal(t, group, token.Group)
+	}
 	require.NoError(t, DB.First(&user, user.Id).Error)
 	assert.EqualValues(t, 5000, user.LegacySubRouterQuota())
 }
