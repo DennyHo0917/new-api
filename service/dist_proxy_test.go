@@ -194,7 +194,7 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	require.NoError(t, model.DB.Create(&unmarkedUser).Error)
 	migratedHash, err := common.HashAccountPassword("existing_password_123")
 	require.NoError(t, err)
-	alreadyMigratedUser := model.User{Username: "already_migrated", Password: migratedHash, Status: common.UserStatusEnabled, Setting: `{"subrouter_id":91}`, AffCode: "legacy05"}
+	alreadyMigratedUser := model.User{Username: "already_migrated", Password: migratedHash, Status: common.UserStatusEnabled, Setting: `{"subrouter_id":91,"subrouter_old_quota":999000,"subrouter_quota_updated_at":1700000000}`, AffCode: "legacy05"}
 	require.NoError(t, model.DB.Create(&alreadyMigratedUser).Error)
 
 	loginRequests := 0
@@ -378,6 +378,18 @@ func TestAuthenticateAndMigrateSubRouterUser(t *testing.T) {
 	assert.False(t, common.ValidatePasswordAndHash("replacement_password_123", persisted.Password))
 	require.NoError(t, RefreshSubRouterLegacyBalance(&alreadyMigratedUser, "already_migrated", "existing_password_123"))
 	assert.EqualValues(t, 333000, alreadyMigratedUser.LegacySubRouterQuota())
+	assert.Greater(t, alreadyMigratedUser.LegacySubRouterQuotaUpdatedAt(), int64(1700000000))
+	persisted = model.User{}
+	require.NoError(t, model.DB.First(&persisted, alreadyMigratedUser.Id).Error)
+	assert.EqualValues(t, 333000, persisted.LegacySubRouterQuota())
+	assert.Zero(t, persisted.Quota)
+
+	// A failed refresh preserves the last successful snapshot and local quota.
+	require.Error(t, RefreshSubRouterLegacyBalance(&alreadyMigratedUser, "already_migrated", "wrong_password"))
+	persisted = model.User{}
+	require.NoError(t, model.DB.First(&persisted, alreadyMigratedUser.Id).Error)
+	assert.EqualValues(t, 333000, persisted.LegacySubRouterQuota())
+	assert.Zero(t, persisted.Quota)
 
 	// A key-list failure leaves the password blank so a safe retry remains possible.
 	_, err = AuthenticateAndMigrateSubRouterUser("token_failure_user", "secret_pass_123")

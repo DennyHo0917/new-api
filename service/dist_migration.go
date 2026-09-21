@@ -398,9 +398,6 @@ func RefreshSubRouterLegacyBalance(user *model.User, username, password string) 
 	if common.UnmarshalJsonStr(user.Setting, &marker) != nil || marker.SubRouterID <= 0 {
 		return nil
 	}
-	if user.LegacySubRouterQuotaUpdatedAt() > 0 {
-		return nil
-	}
 	upstreamUser, _, err := authenticateSubRouterUser(username, password, marker.SubRouterID)
 	if err != nil {
 		return err
