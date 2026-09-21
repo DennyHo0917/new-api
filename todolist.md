@@ -1,5 +1,9 @@
 # API Route 自建后端开发计划与任务清单 (TodoList)
 
+## 2026-09-21 API Keys 分组选择器
+
+- [x] 新建密钥选择分组时复用模型广场的分组 Logo；名称包含 `standard` 的分组使用绿色粗体，包含 `enterprise` 的分组使用橙色粗体。定向 Logo 映射检查与前端生产构建通过（2026-09-21）。
+
 ## 2026-09-21 管理后台链路性能优化
 
 - [x] 将 `www.api-route.com/api/*` 通过 Cloudflare Worker 直接回源 `origin.api-route.com`，绕过 Vercel API Rewrite；请求方法、查询参数、请求体、Cookie 与响应原样透传回归通过，生产响应已无 `x-vercel-*`。已真实删除 Worker 验证请求自动回落至原 Vercel Rewrite，再部署版本 `f63898b3-c703-4d1c-8cff-7282e97d7ce2` 恢复直回源（2026-09-21）。
