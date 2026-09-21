@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaykitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -64,20 +65,27 @@ func setupChannelSelectAutoGroupsTest(t *testing.T) *gorm.DB {
 	return db
 }
 
-func createChannelSelectAutoGroupsChannel(t *testing.T, db *gorm.DB, id int, group, modelName string) {
+func createChannelSelectAutoGroupsChannel(t *testing.T, db *gorm.DB, id int, group, modelName string, multiplier *float64) {
 	t.Helper()
 	priority := int64(0)
 	weight := uint(100)
+	otherSettings := ""
+	if multiplier != nil {
+		data, err := common.Marshal(relaykitdto.ChannelOtherSettings{ModelMultipliers: map[string]float64{modelName: *multiplier}})
+		require.NoError(t, err)
+		otherSettings = string(data)
+	}
 	require.NoError(t, db.Create(&model.Channel{
-		Id:       id,
-		Type:     constant.ChannelTypeOpenAI,
-		Key:      fmt.Sprintf("key-%d", id),
-		Status:   common.ChannelStatusEnabled,
-		Name:     fmt.Sprintf("channel-%d", id),
-		Weight:   &weight,
-		Models:   modelName,
-		Group:    group,
-		Priority: &priority,
+		Id:            id,
+		Type:          constant.ChannelTypeOpenAI,
+		Key:           fmt.Sprintf("key-%d", id),
+		Status:        common.ChannelStatusEnabled,
+		Name:          fmt.Sprintf("channel-%d", id),
+		Weight:        &weight,
+		Models:        modelName,
+		Group:         group,
+		Priority:      &priority,
+		OtherSettings: otherSettings,
 	}).Error)
 	require.NoError(t, db.Create(&model.Ability{
 		Group:     group,
@@ -89,11 +97,11 @@ func createChannelSelectAutoGroupsChannel(t *testing.T, db *gorm.DB, id int, gro
 	}).Error)
 }
 
-func TestCacheGetRandomSatisfiedChannelUsesTokenAutoGroupsWhenGlobalAutoIsEmpty(t *testing.T) {
+func TestCacheGetRandomSatisfiedChannelUsesCheapestAutoGroupThenFallsBack(t *testing.T) {
 	db := setupChannelSelectAutoGroupsTest(t)
 	const modelName = "auto-groups-runtime-model"
-	createChannelSelectAutoGroupsChannel(t, db, 2101, "vip", modelName)
-	createChannelSelectAutoGroupsChannel(t, db, 2102, "default", modelName)
+	createChannelSelectAutoGroupsChannel(t, db, 2101, "vip", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2102, "default", modelName, nil)
 	model.InitChannelCache()
 
 	gin.SetMode(gin.TestMode)
@@ -114,16 +122,49 @@ func TestCacheGetRandomSatisfiedChannelUsesTokenAutoGroupsWhenGlobalAutoIsEmpty(
 	first, selectedGroup, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
 	require.NotNil(t, first)
-	assert.Equal(t, 2101, first.Id)
-	assert.Equal(t, "vip", selectedGroup)
-	assert.Equal(t, "vip", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+	assert.Equal(t, 2102, first.Id)
+	assert.Equal(t, "default", selectedGroup)
+	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
 	assert.Empty(t, setting.GetAutoGroups(), "the selection must not depend on the global Auto list")
 
 	param.IncreaseRetry()
 	second, selectedGroup, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
 	require.NotNil(t, second)
-	assert.Equal(t, 2102, second.Id)
-	assert.Equal(t, "default", selectedGroup)
-	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+	assert.Equal(t, 2101, second.Id)
+	assert.Equal(t, "vip", selectedGroup)
+	assert.Equal(t, "vip", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+}
+
+func TestCacheGetRandomSatisfiedChannelUsesChannelModelMultiplier(t *testing.T) {
+	db := setupChannelSelectAutoGroupsTest(t)
+	const modelName = "auto-groups-multiplier-model"
+	cheaper := 0.25
+	createChannelSelectAutoGroupsChannel(t, db, 2201, "default", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2202, "vip", modelName, &cheaper)
+	model.InitChannelCache()
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"default", "vip"})
+
+	channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "auto",
+		ModelName:  modelName,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 2202, channel.Id)
+	assert.Equal(t, "vip", selectedGroup)
+}
+
+func TestGetRequestAutoGroupsByPricePreservesOrderWithoutPricing(t *testing.T) {
+	setupChannelSelectAutoGroupsTest(t)
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip", "default"})
+
+	assert.Equal(t, []string{"vip", "default"}, GetRequestAutoGroupsByPrice(ctx, "default", "missing-model"))
 }

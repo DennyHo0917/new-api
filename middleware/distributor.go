@@ -133,15 +133,15 @@ func Distribute() func(c *gin.Context) {
 					if affinitySatisfied {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetRequestAutoGroups(c, userGroup)
-							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
-									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+							autoGroups := service.GetRequestAutoGroupsByPrice(c, userGroup, modelRequest.Model)
+							if len(autoGroups) > 0 {
+								cheapestGroup := autoGroups[0]
+								if model.IsChannelEnabledForGroupModel(cheapestGroup, modelRequest.Model, preferred.Id) {
+									selectGroup = cheapestGroup
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, cheapestGroup)
 									channel = preferred
 									affinityUsable = true
-									service.MarkChannelAffinityUsed(c, g, preferred.Id)
-									break
+									service.MarkChannelAffinityUsed(c, cheapestGroup, preferred.Id)
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {

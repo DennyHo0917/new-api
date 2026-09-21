@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"sort"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -44,6 +46,57 @@ type RetryParam struct {
 	RequestPath  string
 	Retry        *int
 	resetNextTry bool
+}
+
+// GetRequestAutoGroupsByPrice returns the token's available Auto groups with the
+// lowest effective group price for the requested model first.
+func GetRequestAutoGroupsByPrice(c *gin.Context, userGroup, modelName string) []string {
+	groups := GetRequestAutoGroups(c, userGroup)
+	prices := make(map[string]float64)
+	routingName := ratio_setting.RoutingMatchModelName(modelName)
+	pricingList := model.GetPricing()
+	var matched *model.Pricing
+	for index := range pricingList {
+		if pricingList[index].ModelName == modelName {
+			matched = &pricingList[index]
+			break
+		}
+	}
+	if matched == nil && routingName != modelName {
+		for index := range pricingList {
+			if pricingList[index].ModelName == routingName {
+				matched = &pricingList[index]
+				break
+			}
+		}
+	}
+	if matched != nil {
+		for group, multipliers := range matched.ChannelMultipliers {
+			fallback := GetUserGroupRatio(userGroup, group)
+			minimum := fallback
+			for index, multiplier := range multipliers {
+				value := fallback
+				if multiplier != nil {
+					value = *multiplier
+				}
+				if index == 0 || value < minimum {
+					minimum = value
+				}
+			}
+			prices[group] = minimum
+		}
+	}
+
+	ordered := append([]string(nil), groups...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, leftPriced := prices[ordered[i]]
+		right, rightPriced := prices[ordered[j]]
+		if leftPriced != rightPriced {
+			return leftPriced
+		}
+		return leftPriced && left < right
+	})
+	return ordered
 }
 
 func (p *RetryParam) GetRetry() int {
@@ -115,7 +168,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	filters := GetChannelConstraints(param.Ctx).Filters
 
 	if param.TokenGroup == "auto" {
-		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
+		autoGroups := GetRequestAutoGroupsByPrice(param.Ctx, userGroup, param.ModelName)
 		if len(autoGroups) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
 		}
