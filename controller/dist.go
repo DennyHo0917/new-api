@@ -29,6 +29,13 @@ func DistGetSiteInfo(c *gin.Context) {
 	cryptoEnabled := isCryptoTopUpEnabled()
 	stripeEnabled := isStripeTopUpEnabled()
 	usdExchangeRate := service.GetUSDCNYExchangeRate(c.Request.Context(), operation_setting.Price)
+	common.OptionMapRWMutex.RLock()
+	notice := strings.TrimSpace(common.OptionMap["Notice"])
+	common.OptionMapRWMutex.RUnlock()
+	notifications := make([]gin.H, 0, 1)
+	if notice != "" {
+		notifications = append(notifications, gin.H{"content": notice})
+	}
 
 	siteName := common.SystemName
 	if siteName == "" {
@@ -53,6 +60,7 @@ func DistGetSiteInfo(c *gin.Context) {
 			"enable_stripe_topup": stripeEnabled,
 			"enable_creem_topup":  false,
 			"allow_sub_dist":      false,
+			"notifications":       notifications,
 			"oauth_origin":        strings.TrimRight(system_setting.ServerAddress, "/"),
 			"oauth_providers":     oauthProviders,
 			"currency": gin.H{
