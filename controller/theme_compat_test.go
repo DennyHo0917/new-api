@@ -47,7 +47,16 @@ func TestGetStatusAdvertisesDefaultDashboard(t *testing.T) {
 	assert.Equal(t, "default", payload.Data["theme"])
 }
 
-func TestDistSiteInfoIncludesConfiguredNotice(t *testing.T) {
+func TestDistSiteInfoIncludesPublicConfiguration(t *testing.T) {
+	previousTurnstileEnabled := common.TurnstileCheckEnabled
+	previousTurnstileSiteKey := common.TurnstileSiteKey
+	common.TurnstileCheckEnabled = true
+	common.TurnstileSiteKey = "test-site-key"
+	t.Cleanup(func() {
+		common.TurnstileCheckEnabled = previousTurnstileEnabled
+		common.TurnstileSiteKey = previousTurnstileSiteKey
+	})
+
 	common.OptionMapRWMutex.Lock()
 	mapWasNil := common.OptionMap == nil
 	if mapWasNil {
@@ -82,12 +91,16 @@ func TestDistSiteInfoIncludesConfiguredNotice(t *testing.T) {
 
 	var payload struct {
 		Data struct {
-			Notifications []struct {
+			TurnstileCheck   bool   `json:"turnstile_check"`
+			TurnstileSiteKey string `json:"turnstile_site_key"`
+			Notifications    []struct {
 				Content string `json:"content"`
 			} `json:"notifications"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+	assert.True(t, payload.Data.TurnstileCheck)
+	assert.Equal(t, "test-site-key", payload.Data.TurnstileSiteKey)
 	require.Len(t, payload.Data.Notifications, 1)
 	assert.Equal(t, "Scheduled maintenance", payload.Data.Notifications[0].Content)
 }

@@ -1,5 +1,9 @@
 # API Route 自建后端开发计划与任务清单 (TodoList)
 
+## 2026-09-21 忘记密码业务结果与 Turnstile
+
+- [x] 忘记密码仅在后端明确接受请求后显示“已发送”；分站公开配置提供 Turnstile 开关与站点公钥，前端提交有效 token，并区分业务拒绝与网络失败；不存在邮箱继续返回一致的接受结果。覆盖 Turnstile 关闭、开启后缺少/无效/有效 token，以及前端 `success:false`/缺失结果回归；middleware/controller 定向测试、后端构建、前端认证检查与生产构建通过，本地 `5173` 已连接真实 VPS（生产当前 Turnstile 关闭）。依据 OWASP ASVS 5.0.0 V6.3 与 Forgot Password、Authentication、Session Management Cheat Sheets（2026-09-21）。
+
 ## 2026-09-21 调用日志经营数据
 
 - [x] 管理后台调用日志新增消费渠道、用户消费、成本、收益四列；渠道优先展示真实渠道名，金额统一按当前币种显示，成本按现行 5% 上游加价反推，收益为用户消费减成本。补齐四语言表头，日志回归检查与前端生产构建通过（2026-09-21）。

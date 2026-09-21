@@ -54,6 +54,8 @@ func DistGetSiteInfo(c *gin.Context) {
 		"data": gin.H{
 			"name":                siteName,
 			"theme_template":      "claude",
+			"turnstile_check":     common.TurnstileCheckEnabled,
+			"turnstile_site_key":  common.TurnstileSiteKey,
 			"enable_topup":        true,
 			"enable_online_topup": isEpayTopUpEnabled(),
 			"enable_crypto_topup": cryptoEnabled,
