@@ -39,8 +39,8 @@ func setupChannelSelectAutoGroupsTest(t *testing.T) *gorm.DB {
 	common.RetryTimes = 0
 
 	require.NoError(t, setting.UpdateAutoGroupsByJsonString(`[]`))
-	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP"}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":2}`))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","basic standard":"Basic","premium standard":"Premium","premium enterprise":"Enterprise"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"basic standard":1,"premium standard":2,"premium enterprise":3}`))
 	require.NoError(t, setting.UpdateMaxTokenAutoGroups("2"))
 
 	t.Cleanup(func() {
@@ -97,18 +97,17 @@ func createChannelSelectAutoGroupsChannel(t *testing.T, db *gorm.DB, id int, gro
 	}).Error)
 }
 
-func TestCacheGetRandomSatisfiedChannelUsesCheapestAutoGroupThenFallsBack(t *testing.T) {
+func TestCacheGetRandomSatisfiedChannelUsesCheapestAutoGroupOnEveryRetry(t *testing.T) {
 	db := setupChannelSelectAutoGroupsTest(t)
 	const modelName = "auto-groups-runtime-model"
-	createChannelSelectAutoGroupsChannel(t, db, 2101, "vip", modelName, nil)
-	createChannelSelectAutoGroupsChannel(t, db, 2102, "default", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2101, "premium standard", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2102, "basic standard", modelName, nil)
 	model.InitChannelCache()
 
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
-	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip", "default"})
-	common.SetContextKey(ctx, constant.ContextKeyTokenCrossGroupRetry, true)
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"premium standard", "basic standard"})
 
 	retry := 0
 	param := &RetryParam{
@@ -123,31 +122,31 @@ func TestCacheGetRandomSatisfiedChannelUsesCheapestAutoGroupThenFallsBack(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	assert.Equal(t, 2102, first.Id)
-	assert.Equal(t, "default", selectedGroup)
-	assert.Equal(t, "default", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+	assert.Equal(t, "basic standard", selectedGroup)
+	assert.Equal(t, "basic standard", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
 	assert.Empty(t, setting.GetAutoGroups(), "the selection must not depend on the global Auto list")
 
 	param.IncreaseRetry()
 	second, selectedGroup, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
 	require.NotNil(t, second)
-	assert.Equal(t, 2101, second.Id)
-	assert.Equal(t, "vip", selectedGroup)
-	assert.Equal(t, "vip", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
+	assert.Equal(t, 2102, second.Id)
+	assert.Equal(t, "basic standard", selectedGroup)
+	assert.Equal(t, "basic standard", common.GetContextKeyString(ctx, constant.ContextKeyAutoGroup))
 }
 
 func TestCacheGetRandomSatisfiedChannelUsesChannelModelMultiplier(t *testing.T) {
 	db := setupChannelSelectAutoGroupsTest(t)
 	const modelName = "auto-groups-multiplier-model"
 	cheaper := 0.25
-	createChannelSelectAutoGroupsChannel(t, db, 2201, "default", modelName, nil)
-	createChannelSelectAutoGroupsChannel(t, db, 2202, "vip", modelName, &cheaper)
+	createChannelSelectAutoGroupsChannel(t, db, 2201, "basic standard", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2202, "premium standard", modelName, &cheaper)
 	model.InitChannelCache()
 
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
-	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"default", "vip"})
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"basic standard", "premium standard"})
 
 	channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
 		Ctx:        ctx,
@@ -157,14 +156,57 @@ func TestCacheGetRandomSatisfiedChannelUsesChannelModelMultiplier(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, channel)
 	assert.Equal(t, 2202, channel.Id)
-	assert.Equal(t, "vip", selectedGroup)
+	assert.Equal(t, "premium standard", selectedGroup)
+}
+
+func TestCacheGetRandomSatisfiedChannelDoesNotFallBackToExpensiveGroup(t *testing.T) {
+	db := setupChannelSelectAutoGroupsTest(t)
+	const modelName = "auto-groups-strict-cheapest-model"
+	cheaper := 0.25
+	createChannelSelectAutoGroupsChannel(t, db, 2301, "basic standard", modelName, nil)
+	createChannelSelectAutoGroupsChannel(t, db, 2302, "premium standard", modelName, &cheaper)
+	model.InitChannelCache()
+
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"basic standard", "premium standard"})
+	require.Equal(t, []string{"premium standard", "basic standard"}, GetRequestAutoGroupsByPrice(ctx, "default", modelName))
+	model.CacheUpdateChannelStatus(2302, common.ChannelStatusManuallyDisabled)
+
+	channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "auto",
+		ModelName:  modelName,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, channel)
+	assert.Equal(t, "auto", selectedGroup)
+}
+
+func TestCacheGetRandomSatisfiedChannelAllowsExplicitEnterpriseGroup(t *testing.T) {
+	db := setupChannelSelectAutoGroupsTest(t)
+	const modelName = "explicit-enterprise-model"
+	createChannelSelectAutoGroupsChannel(t, db, 2401, "premium enterprise", modelName, nil)
+	model.InitChannelCache()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	channel, selectedGroup, err := CacheGetRandomSatisfiedChannel(&RetryParam{
+		Ctx:        ctx,
+		TokenGroup: "premium enterprise",
+		ModelName:  modelName,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 2401, channel.Id)
+	assert.Equal(t, "premium enterprise", selectedGroup)
 }
 
 func TestGetRequestAutoGroupsByPricePreservesOrderWithoutPricing(t *testing.T) {
 	setupChannelSelectAutoGroupsTest(t)
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip", "default"})
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"premium standard", "basic standard"})
 
-	assert.Equal(t, []string{"vip", "default"}, GetRequestAutoGroupsByPrice(ctx, "default", "missing-model"))
+	assert.Equal(t, []string{"premium standard", "basic standard"}, GetRequestAutoGroupsByPrice(ctx, "default", "missing-model"))
 }

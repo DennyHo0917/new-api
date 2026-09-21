@@ -53,12 +53,16 @@ func IsUserSelectableGroup(userGroup, groupName string) bool {
 	return GroupInUserUsableGroups(userGroup, groupName) && ratio_setting.ContainsGroupRatio(groupName)
 }
 
+func IsAutoSelectableGroup(groupName string) bool {
+	return strings.Contains(strings.ToLower(groupName), "standard")
+}
+
 // GetUserAutoGroup 根据用户分组获取自动分组设置
 func GetUserAutoGroup(userGroup string) []string {
 	autoGroups := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, group := range setting.GetAutoGroups() {
-		if group == "auto" || !ratio_setting.ContainsGroupRatio(group) {
+		if !IsAutoSelectableGroup(group) || !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}
 		if _, ok := seen[group]; ok {
@@ -69,7 +73,7 @@ func GetUserAutoGroup(userGroup string) []string {
 	}
 	remaining := make([]string, 0)
 	for group := range ratio_setting.GetGroupRatioCopy() {
-		if group == "auto" {
+		if !IsAutoSelectableGroup(group) || !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}
 		if _, ok := seen[group]; !ok {
@@ -88,7 +92,7 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
-		if !IsUserSelectableGroup(userGroup, group) {
+		if !IsAutoSelectableGroup(group) || !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}
 		if _, ok := seen[group]; ok {

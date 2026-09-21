@@ -453,8 +453,8 @@ func TokenAuth() func(c *gin.Context) {
 		userCache.WriteContext(c)
 
 		userGroup := userCache.Group
-		tokenGroup := token.Group
-		if tokenGroup != "" {
+		tokenGroup := effectiveTokenGroup(token.Group)
+		if tokenGroup != "auto" {
 			// check common.UserUsableGroups[userGroup]
 			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
 				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
@@ -462,14 +462,11 @@ func TokenAuth() func(c *gin.Context) {
 			}
 			// check group in common.GroupRatio
 			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
-				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
-					return
-				}
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
+				return
 			}
-			userGroup = tokenGroup
 		}
-		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, tokenGroup)
 
 		err = SetupContextForToken(c, token, parts...)
 		if err != nil {
@@ -477,6 +474,13 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+func effectiveTokenGroup(group string) string {
+	if group == "" {
+		return "auto"
+	}
+	return group
 }
 
 func applyWebSocketSubprotocolAuthorization(header http.Header) bool {
@@ -521,7 +525,7 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	} else {
 		c.Set("token_model_limit_enabled", false)
 	}
-	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, effectiveTokenGroup(token.Group))
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
 	if token.AutoGroups != "" {
 		autoGroups, err := token.GetAutoGroups()

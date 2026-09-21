@@ -24,8 +24,8 @@ func configureTokenAutoGroupsTest(t *testing.T, maxCount string, autoGroups stri
 	originalRatios := ratio_setting.GroupRatio2JSONString()
 	require.NoError(t, setting.UpdateMaxTokenAutoGroups(maxCount))
 	require.NoError(t, setting.UpdateAutoGroupsByJsonString(autoGroups))
-	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP"}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1}`))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","gpt standard":"GPT","claude standard":"Claude","gpt enterprise":"Enterprise"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"gpt standard":1,"claude standard":1,"gpt enterprise":1}`))
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateMaxTokenAutoGroups(stringInt(originalMax)))
 		require.NoError(t, setting.UpdateAutoGroupsByJsonString(originalAutoGroups))
@@ -84,7 +84,7 @@ func TestAddTokenEmptyAutoGroupsInheritGlobalAuto(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+			configureTokenAutoGroupsTest(t, "5", `["gpt standard","claude standard"]`)
 			user := setupTokenAutoGroupsControllerTest(t)
 			request := baseAutoTokenRequest("create-" + test.name)
 			if test.includeField {
@@ -110,10 +110,10 @@ func TestAddTokenEmptyAutoGroupsInheritGlobalAuto(t *testing.T) {
 }
 
 func TestAddTokenPersistsOrderedAutoGroupsSnapshot(t *testing.T) {
-	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	configureTokenAutoGroupsTest(t, "5", `["gpt standard","claude standard"]`)
 	user := setupTokenAutoGroupsControllerTest(t)
 	request := baseAutoTokenRequest("ordered-snapshot")
-	request["auto_groups"] = []string{"vip", "default"}
+	request["auto_groups"] = []string{"claude standard", "gpt standard"}
 
 	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
 	AddToken(ctx)
@@ -121,7 +121,7 @@ func TestAddTokenPersistsOrderedAutoGroupsSnapshot(t *testing.T) {
 
 	var token model.Token
 	require.NoError(t, model.DB.Where("name = ?", "ordered-snapshot").First(&token).Error)
-	assert.JSONEq(t, `["vip","default"]`, token.AutoGroups)
+	assert.JSONEq(t, `["claude standard","gpt standard"]`, token.AutoGroups)
 
 	getCtx, getRecorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/"+stringInt(token.Id), nil, user.Id)
 	getCtx.Params = append(getCtx.Params, gin.Param{Key: "id", Value: stringInt(token.Id)})
@@ -132,7 +132,7 @@ func TestAddTokenPersistsOrderedAutoGroupsSnapshot(t *testing.T) {
 		AutoGroups []string `json:"auto_groups"`
 	}
 	require.NoError(t, common.Unmarshal(getResponse.Data, &data))
-	assert.Equal(t, []string{"vip", "default"}, data.AutoGroups)
+	assert.Equal(t, []string{"claude standard", "gpt standard"}, data.AutoGroups)
 }
 
 func TestUpdateTokenAutoGroupsTriStateAndNonAutoCleanup(t *testing.T) {
@@ -144,20 +144,20 @@ func TestUpdateTokenAutoGroupsTriStateAndNonAutoCleanup(t *testing.T) {
 		expectedAutoGroups string
 		expectedRetry      bool
 	}{
-		{name: "omitted preserves", group: "auto", expectedAutoGroups: `["vip","default"]`, expectedRetry: true},
+		{name: "omitted preserves", group: "auto", expectedAutoGroups: `["claude standard","gpt standard"]`, expectedRetry: true},
 		{name: "null inherits", includeField: true, value: nil, group: "auto", expectedRetry: true},
 		{name: "empty inherits", includeField: true, value: []string{}, group: "auto", expectedRetry: true},
-		{name: "non auto clears and disables retry", includeField: true, value: []string{"vip"}, group: "default"},
+		{name: "non auto clears and disables retry", includeField: true, value: []string{"gpt standard"}, group: "default"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+			configureTokenAutoGroupsTest(t, "5", `["gpt standard","claude standard"]`)
 			user := setupTokenAutoGroupsControllerTest(t)
 			token := seedToken(t, model.DB, user.Id, "update-auto", "update-auto-key")
 			token.Group = "auto"
 			token.CrossGroupRetry = true
-			require.NoError(t, token.SetAutoGroups([]string{"vip", "default"}))
+			require.NoError(t, token.SetAutoGroups([]string{"claude standard", "gpt standard"}))
 			require.NoError(t, model.DB.Save(token).Error)
 
 			request := baseAutoTokenRequest("updated-auto")
@@ -190,15 +190,16 @@ func TestAddTokenRejectsInvalidAutoGroups(t *testing.T) {
 		maxCount string
 		groups   []string
 	}{
-		{name: "over limit", maxCount: "1", groups: []string{"default", "vip"}},
-		{name: "duplicate", maxCount: "5", groups: []string{"default", "default"}},
+		{name: "over limit", maxCount: "1", groups: []string{"gpt standard", "claude standard"}},
+		{name: "duplicate", maxCount: "5", groups: []string{"gpt standard", "gpt standard"}},
 		{name: "auto pseudo group", maxCount: "5", groups: []string{"auto"}},
+		{name: "enterprise group", maxCount: "5", groups: []string{"gpt enterprise"}},
 		{name: "unavailable", maxCount: "5", groups: []string{"missing"}},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			configureTokenAutoGroupsTest(t, test.maxCount, `["default","vip"]`)
+			configureTokenAutoGroupsTest(t, test.maxCount, `["gpt standard","claude standard"]`)
 			user := setupTokenAutoGroupsControllerTest(t)
 			request := baseAutoTokenRequest("invalid-" + test.name)
 			request["auto_groups"] = test.groups
@@ -216,7 +217,7 @@ func TestAddTokenRejectsInvalidAutoGroups(t *testing.T) {
 }
 
 func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) {
-	configureTokenAutoGroupsTest(t, "1", `["vip","missing","default"]`)
+	configureTokenAutoGroupsTest(t, "1", `["gpt enterprise","gpt standard","missing","claude standard"]`)
 	user := setupTokenAutoGroupsControllerTest(t)
 
 	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/auto-groups", nil, user.Id)
@@ -229,6 +230,6 @@ func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) 
 		MaxCount int      `json:"max_count"`
 	}
 	require.NoError(t, common.Unmarshal(response.Data, &data))
-	assert.Equal(t, []string{"vip", "default"}, data.Groups)
+	assert.Equal(t, []string{"gpt standard", "claude standard"}, data.Groups)
 	assert.Equal(t, 1, data.MaxCount)
 }

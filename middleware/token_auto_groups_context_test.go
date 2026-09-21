@@ -28,6 +28,14 @@ func TestSetupContextForTokenPreservesCustomAutoGroupsOrder(t *testing.T) {
 	assert.Equal(t, []string{"vip", "default"}, value)
 }
 
+func TestSetupContextForTokenTreatsLegacyEmptyGroupAsAuto(t *testing.T) {
+	ctx := newTokenAutoGroupsContext()
+	token := &model.Token{Id: 1, UserId: 2}
+
+	require.NoError(t, SetupContextForToken(ctx, token))
+	assert.Equal(t, "auto", common.GetContextKeyString(ctx, constant.ContextKeyTokenGroup))
+}
+
 func TestSetupContextForTokenTreatsStoredEmptyArrayAsInheritance(t *testing.T) {
 	ctx := newTokenAutoGroupsContext()
 	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `[]`}

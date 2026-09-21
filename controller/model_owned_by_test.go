@@ -92,8 +92,8 @@ func TestGetModelListGroupsUsesFilteredTokenAutoGroupsSnapshot(t *testing.T) {
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
 	originalRatios := ratio_setting.GroupRatio2JSONString()
 	require.NoError(t, setting.UpdateMaxTokenAutoGroups("1"))
-	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP"}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1}`))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip standard":"VIP"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip standard":1}`))
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateMaxTokenAutoGroups(fmt.Sprintf("%d", originalMax)))
 		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
@@ -104,13 +104,13 @@ func TestGetModelListGroupsUsesFilteredTokenAutoGroupsSnapshot(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
 	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "auto")
-	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip", "default"})
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip standard", "default"})
 
 	groups, err := getModelListGroups(ctx)
 	require.NoError(t, err)
-	require.Equal(t, []string{"vip"}, groups.ownerGroups)
+	require.Equal(t, []string{"vip standard"}, groups.ownerGroups)
 
-	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip"})
+	common.SetContextKey(ctx, constant.ContextKeyTokenAutoGroups, []string{"vip standard"})
 	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default"}`))
 	groups, err = getModelListGroups(ctx)
 	require.NoError(t, err)

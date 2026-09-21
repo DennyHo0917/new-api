@@ -109,6 +109,10 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 	}
 	seen := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
+		if !service.IsAutoSelectableGroup(group) {
+			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsInvalid, map[string]any{"Group": group})
+			return false
+		}
 		if _, ok := seen[group]; ok {
 			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsDuplicate, map[string]any{"Group": group})
 			return false
