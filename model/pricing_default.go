@@ -7,36 +7,38 @@ import (
 
 // 简化的供应商映射规则
 var defaultVendorRules = map[string]string{
-	"gpt":      "OpenAI",
-	"dall-e":   "OpenAI",
-	"whisper":  "OpenAI",
-	"o1":       "OpenAI",
-	"o3":       "OpenAI",
-	"claude":   "Anthropic",
-	"gemini":   "Google",
-	"moonshot": "Moonshot",
-	"kimi":     "Moonshot",
-	"chatglm":  "智谱",
-	"glm-":     "智谱",
-	"qwen":     "阿里巴巴",
-	"deepseek": "DeepSeek",
-	"abab":     "MiniMax",
-	"minimax":  "MiniMax",
-	"ernie":    "百度",
-	"spark":    "讯飞",
-	"hunyuan":  "腾讯",
-	"command":  "Cohere",
-	"@cf/":     "Cloudflare",
-	"360":      "360",
-	"yi":       "零一万物",
-	"jina":     "Jina",
-	"mistral":  "Mistral",
-	"grok":     "xAI",
-	"llama":    "Meta",
-	"doubao":   "字节跳动",
-	"kling":    "快手",
-	"jimeng":   "即梦",
-	"vidu":     "Vidu",
+	"gpt":       "OpenAI",
+	"dall-e":    "OpenAI",
+	"whisper":   "OpenAI",
+	"o1":        "OpenAI",
+	"o3":        "OpenAI",
+	"claude":    "Anthropic",
+	"gemini":    "Google",
+	"moonshot":  "Moonshot",
+	"kimi":      "Moonshot",
+	"chatglm":   "智谱",
+	"glm-":      "智谱",
+	"qwen":      "阿里巴巴",
+	"deepseek":  "DeepSeek",
+	"abab":      "MiniMax",
+	"minimax":   "MiniMax",
+	"ernie":     "百度",
+	"spark":     "讯飞",
+	"hunyuan":   "腾讯",
+	"command":   "Cohere",
+	"@cf/":      "Cloudflare",
+	"360":       "360",
+	"yi":        "零一万物",
+	"jina":      "Jina",
+	"mistral":   "Mistral",
+	"grok":      "xAI",
+	"llama":     "Meta",
+	"doubao":    "字节跳动",
+	"bytedance": "字节跳动",
+	"seedance":  "字节跳动",
+	"kling":     "快手",
+	"jimeng":    "即梦",
+	"vidu":      "Vidu",
 }
 
 // 供应商默认图标映射
@@ -83,7 +85,8 @@ func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vend
 	})
 	for _, ability := range enableAbilities {
 		modelName := ability.Model
-		if _, exists := metaMap[modelName]; exists {
+		meta, exists := metaMap[modelName]
+		if exists && meta.VendorID != 0 {
 			continue
 		}
 
@@ -102,7 +105,11 @@ func initDefaultVendorMapping(metaMap map[string]*Model, vendorMap map[int]*Vend
 			}
 		}
 
-		// 创建模型元数据
+		if exists {
+			meta.VendorID = vendorID
+			continue
+		}
+
 		metaMap[modelName] = &Model{
 			ModelName: modelName,
 			VendorID:  vendorID,
