@@ -351,6 +351,7 @@
   - [x] 2026-09-17 修复本地检查入口：`api-route-deploy-new` 新增中文 `/setup` 初始化页及 `/api/setup` 调用，避免误打开后端 `3000` 端口的占位 `web/dist` 页面；前端构建通过。
   - [x] 提交前核心定向测试通过；2026-09-20 已修复 Windows/SQLite 临时库连接清理与相关测试状态污染，四包全量测试连续两轮通过。
 - [ ] **5.2 VPS 生产环境构建与部署**
+  - [ ] 2026-09-22 将生产镜像构建迁移到 GitHub Actions：Actions 构建并传输成品镜像，VPS 仅加载镜像、健康切换与失败回滚，避免生产机编译打满 CPU。
   - [x] 修复生图与视频模型计价：每天从 `apiroute.subrouter.ai` 原样同步按次/按秒售价并统一加价 5%，媒体模型不再套用官方 Token 输入输出价；生产已确认 Nano Banana / GPT Image 为按次价、Seedance 为按秒分辨率表达式，SubRouter 渠道倍率固定为 1 防止重复加价（后端 `2fa4f79b5`，前端 `f659d1a`，2026-09-19）
   - [x] 提交代码并由 GitHub Actions 自动构建部署至 VPS（提交 `686dce6df`，Deploy API Route #6 成功，耗时 3m56s）
   - [x] 通过部署密钥注入 Stripe、ZPay、GitHub、Google、X 配置，后端不得持久化或输出明文密钥（运行时文件注入与生产读取已验证）

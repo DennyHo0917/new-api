@@ -16,6 +16,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build production image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: api-route-backend:latest
+          outputs: type=docker,dest=/tmp/api-route-image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Compress production image
+        run: gzip /tmp/api-route-image.tar
+
       - name: Configure SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -76,15 +95,23 @@ jobs:
             -P "$DEPLOY_PORT" \
             "$runtime_file" \
             "$DEPLOY_USER@$DEPLOY_HOST:$runtime_path"
+          image_path="/tmp/api-route-image-${GITHUB_RUN_ID:-$$}.tar.gz"
+          scp -q \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/id_ed25519 \
+            -P "$DEPLOY_PORT" \
+            /tmp/api-route-image.tar.gz \
+            "$DEPLOY_USER@$DEPLOY_HOST:$image_path"
           ssh \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -i ~/.ssh/id_ed25519 \
             -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "RUNTIME_PATH='$runtime_path' bash -s" <<'REMOTE'
+            "RUNTIME_PATH='$runtime_path' IMAGE_PATH='$image_path' bash -s" <<'REMOTE'
           set -eu
-          trap 'rm -f "$RUNTIME_PATH"' EXIT
+          trap 'rm -f "$RUNTIME_PATH" "$IMAGE_PATH"' EXIT
           while IFS= read -r line; do
             name="${line%%=*}"
             encoded="${line#*=}"
@@ -97,7 +124,7 @@ jobs:
             [ -n "$rollback_image" ] || return 1
             docker image tag api-route-backend:rollback api-route-backend:latest
             cd /data/api-route
-            docker compose up -d --no-deps --force-recreate new-api
+            docker compose up -d --no-deps --force-recreate --no-build new-api
             for i in {1..30}; do
               if curl -fsS http://127.0.0.1:3000/api/status >/dev/null; then
                 return 0
@@ -110,15 +137,19 @@ jobs:
             rollback_image="$(docker inspect -f '{{.Image}}' api-route)"
             docker image tag "$rollback_image" api-route-backend:rollback
           fi
-          if ! /data/api-route/deploy.sh; then
+          install -m 600 "$RUNTIME_PATH" /data/api-route/data/.env.runtime
+          if ! gzip -dc "$IMAGE_PATH" | docker load; then
             rollback_backend || true
             exit 1
           fi
-          docker cp "$RUNTIME_PATH" api-route:/data/.env.runtime
-          docker exec api-route chmod 600 /data/.env.runtime
-          docker restart api-route
+          cd /data/api-route
+          if ! docker compose up -d --no-deps --force-recreate --no-build new-api; then
+            rollback_backend || true
+            exit 1
+          fi
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:3000/api/status >/dev/null; then
+              docker image prune -f
               exit 0
             fi
             sleep 2
