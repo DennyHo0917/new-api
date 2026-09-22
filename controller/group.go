@@ -78,7 +78,31 @@ func UpdateGroupRatios(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	if err := model.UpdateOption("GroupRatio", string(raw)); err != nil {
+	usableGroups := setting.GetUserUsableGroupsCopy()
+	for name := range request.Ratios {
+		lowerName := strings.ToLower(name)
+		if strings.Contains(lowerName, "standard") || strings.Contains(lowerName, "enterprise") {
+			if _, exists := usableGroups[name]; !exists {
+				usableGroups[name] = name
+			}
+		}
+	}
+	for name := range usableGroups {
+		lowerName := strings.ToLower(name)
+		_, exists := request.Ratios[name]
+		if !exists && (strings.Contains(lowerName, "standard") || strings.Contains(lowerName, "enterprise")) {
+			delete(usableGroups, name)
+		}
+	}
+	usableGroupsRaw, err := common.Marshal(usableGroups)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"GroupRatio":       string(raw),
+		"UserUsableGroups": string(usableGroupsRaw),
+	}); err != nil {
 		common.ApiError(c, err)
 		return
 	}

@@ -21,13 +21,17 @@ func TestUpdateGroupRatiosPersistsValidatedValues(t *testing.T) {
 	previousOptions := common.OptionMap
 	common.OptionMap = map[string]string{}
 	previousRatios := ratio_setting.GroupRatio2JSONString()
+	previousUsableGroups := setting.UserUsableGroups2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"legacy standard":1}`))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","legacy standard":"Legacy"}`))
 	t.Cleanup(func() {
 		common.OptionMap = previousOptions
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousRatios))
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(previousUsableGroups))
 	})
 
 	ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/group/ratios", map[string]any{
-		"ratios": map[string]float64{"default": 1, "partner": 0.75},
+		"ratios": map[string]float64{"default": 1, "partner enterprise": 0.75},
 	}, 7)
 	ctx.Set("role", common.RoleAdminUser)
 	UpdateGroupRatios(ctx)
@@ -36,8 +40,13 @@ func TestUpdateGroupRatiosPersistsValidatedValues(t *testing.T) {
 
 	var option model.Option
 	require.NoError(t, db.Where("key = ?", "GroupRatio").First(&option).Error)
-	assert.JSONEq(t, `{"default":1,"partner":0.75}`, option.Value)
-	assert.Equal(t, float64(0.75), ratio_setting.GetGroupRatio("partner"))
+	assert.JSONEq(t, `{"default":1,"partner enterprise":0.75}`, option.Value)
+	assert.Equal(t, float64(0.75), ratio_setting.GetGroupRatio("partner enterprise"))
+	option = model.Option{}
+	require.NoError(t, db.Where("key = ?", "UserUsableGroups").First(&option).Error)
+	assert.JSONEq(t, `{"default":"Default","partner enterprise":"partner enterprise"}`, option.Value)
+	assert.Equal(t, "partner enterprise", setting.GetUserUsableGroupsCopy()["partner enterprise"])
+	assert.NotContains(t, setting.GetUserUsableGroupsCopy(), "legacy standard")
 
 	ctx, recorder = newAuthenticatedContext(t, http.MethodPut, "/api/group/ratios", map[string]any{
 		"ratios": map[string]float64{"default": -1},
@@ -45,7 +54,7 @@ func TestUpdateGroupRatiosPersistsValidatedValues(t *testing.T) {
 	ctx.Set("role", common.RoleAdminUser)
 	UpdateGroupRatios(ctx)
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Equal(t, float64(0.75), ratio_setting.GetGroupRatio("partner"))
+	assert.Equal(t, float64(0.75), ratio_setting.GetGroupRatio("partner enterprise"))
 }
 
 func TestUpdateGroupDisplayOrderPersistsKnownGroups(t *testing.T) {
