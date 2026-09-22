@@ -330,6 +330,9 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	if err := migrateChannelGroupToText(DB); err != nil {
+		return err
+	}
 	if err := migrateOptionPrimaryKey(DB); err != nil {
 		common.SysError("failed to migrate options primary key: " + err.Error())
 	}
@@ -392,6 +395,25 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func migrateChannelGroupToText(db *gorm.DB) error {
+	if db.Dialector.Name() != "postgres" || !db.Migrator().HasTable(&Channel{}) || !db.Migrator().HasColumn(&Channel{}, "group") {
+		return nil
+	}
+
+	var dataType string
+	if err := db.Raw(`SELECT data_type FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'channels' AND column_name = 'group'`).Scan(&dataType).Error; err != nil {
+		return fmt.Errorf("inspect channels.group type: %w", err)
+	}
+	if dataType == "text" {
+		return nil
+	}
+	if err := db.Exec(`ALTER TABLE channels ALTER COLUMN "group" TYPE text`).Error; err != nil {
+		return fmt.Errorf("migrate channels.group to text: %w", err)
 	}
 	return nil
 }

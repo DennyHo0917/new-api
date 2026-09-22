@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -78,6 +80,61 @@ func TestChannelModelGroupsCreateExactAbilities(t *testing.T) {
 	assert.Equal(t, "chat-model", abilities[0].Model)
 	assert.Equal(t, "premium", abilities[1].Group)
 	assert.Equal(t, "image-model", abilities[1].Model)
+}
+
+func TestChannelGroupPostgresTextMigration(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	for _, tt := range []struct {
+		name   string
+		legacy bool
+	}{
+		{name: "fresh"},
+		{name: "upgrade", legacy: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := db.Begin()
+			require.NoError(t, tx.Error)
+			t.Cleanup(func() { require.NoError(t, tx.Rollback().Error) })
+
+			schema := fmt.Sprintf("channel_group_migration_%d", time.Now().UnixNano())
+			require.NoError(t, tx.Exec("CREATE SCHEMA "+schema).Error)
+			require.NoError(t, tx.Exec("SET LOCAL search_path TO "+schema).Error)
+			if tt.legacy {
+				require.NoError(t, tx.Exec(`CREATE TABLE channels (id integer PRIMARY KEY, "group" varchar(64) DEFAULT 'default')`).Error)
+				require.NoError(t, tx.Exec(`INSERT INTO channels (id, "group") VALUES (1, 'grok standard')`).Error)
+			}
+
+			require.NoError(t, migrateChannelGroupToText(tx))
+			if !tt.legacy {
+				require.NoError(t, tx.AutoMigrate(&Channel{}))
+			}
+			require.NoError(t, migrateChannelGroupToText(tx), "migration must be idempotent")
+
+			var dataType string
+			require.NoError(t, tx.Raw(`SELECT data_type FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'channels' AND column_name = 'group'`).Scan(&dataType).Error)
+			assert.Equal(t, "text", dataType)
+
+			longGroups := strings.Repeat("standard,enterprise,", 5)
+			if tt.legacy {
+				require.NoError(t, tx.Exec(`UPDATE channels SET "group" = ? WHERE id = 1`, longGroups).Error)
+				var saved string
+				require.NoError(t, tx.Raw(`SELECT "group" FROM channels WHERE id = 1`).Scan(&saved).Error)
+				assert.Equal(t, longGroups, saved)
+				return
+			}
+			require.NoError(t, tx.Create(&Channel{Id: 1, Key: "test", Name: "test", Group: longGroups}).Error)
+		})
+	}
 }
 
 func TestChannelModelGroupsRejectUnknownValues(t *testing.T) {
